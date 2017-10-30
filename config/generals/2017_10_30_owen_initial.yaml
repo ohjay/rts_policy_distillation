@@ -1,0 +1,16 @@
+# -------------------------------------
+# RTS Policy Distillation - Config File
+# -------------------------------------
+
+# RUN INFO
+# --------
+
+env: generals
+operation: train  # (train,)
+
+# ENV-SPECIFIC INFO
+# ------------------
+
+generals:
+  user_id: Byd0qf4R-
+  mode: 1v1
