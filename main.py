@@ -25,7 +25,7 @@ def get_session():
     print("AVAILABLE GPUS: ", get_available_gpus())
     return session
 
-def train(config, env):
+def train(env, config):
     # Run DQN training for the given environment
     session = get_session()
     num_timesteps = int(4e7)
@@ -45,12 +45,12 @@ def train(config, env):
 
     exploration_schedule = PiecewiseSchedule([(0, 0.2), (1e6, 0.1), (num_iterations / 2, 0.01)], outside_value=0.01)
 
-    dqn.learn(config, env, optimizer_spec=optimizer, session=session, exploration=exploration_schedule,
+    dqn.learn(env, config, optimizer_spec=optimizer, session=session, exploration=exploration_schedule,
               stopping_criterion=stopping_criterion, replay_buffer_size=1000000, batch_size=32, gamma=0.99,
               learning_starts=50000, learning_freq=4, frame_history_len=1, target_update_freq=10000, grad_norm_clipping=10)
     env.close()
 
-def test(config, env):
+def test(env, config):
     for update in env.get_updates():
         observation = env.extract_observation(update)
 
@@ -66,7 +66,7 @@ def run(config):
         user_id = env_info['user_id']
         env = generals.Generals(user_id)
 
-    eval(config['operation'])(config, env)
+    eval(config['operation'])(env, config)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

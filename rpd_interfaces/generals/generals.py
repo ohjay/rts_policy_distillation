@@ -208,6 +208,7 @@ class Generals(Environment):
         for update in self.get_updates():
             if type(update) == dict and update['result'] is None:
                 return self.extract_observation(update)
+        return np.full(1884, -2, np.int32)  # done
 
     @staticmethod
     def patch(old, diff):
@@ -246,6 +247,10 @@ class Generals(Environment):
         Whenever applicable, -2 indicates "nonexistent / invalid".
         Maximum capacity is eight players and a 30x30 map.
         """
+        if update['result'] is not None:
+            # TODO this needs to represent a high-reward observation if we win, and vice-versa if we lose
+            return np.full(1884, -2, np.int32)
+
         _scores = []
         for s in update['scores']:
             _scores.extend([s['tiles'], s['total'], 1 - int(s['dead'])])
@@ -257,7 +262,7 @@ class Generals(Environment):
             self._pad(update['cities'], _INVALID, 30) +
             self._pad(update['terrain'], _INVALID, 900) +
             self._pad(update['armies'], _INVALID, 900)
-        ).astype(np.int16)  # the only things outside of byte range are scores
+        ).astype(np.int32)  # the only things outside of byte range are scores
         self.prev_observation = observation
         return observation
 
@@ -267,9 +272,16 @@ class Generals(Environment):
         self.client.send(['attack', start_index, end_index, is_half, self.move_id])
         self.move_id += 1
 
+    @staticmethod
+    def _parse_action(action):
+        """Grabs (start_index, end_index) from ACTION."""
+        # start_index, end_index = int(round(action[0])), int(round(action[1]))
+        start_index, end_index = int(action) // 1000, int(action) % 1000
+        return start_index, end_index
+
     def _valid(self, action):
         """Returns True if the given action is currently valid."""
-        start_index, end_index = int(round(action[0])), int(round(action[1]))
+        start_index, end_index = self._parse_action(action)
         if self.terrain[start_index] != self.player_index:
             return False
         width, height = self.map[0], self.map[1]
@@ -312,10 +324,14 @@ class Generals(Environment):
                 else:
                     continue
 
-                return np.array([start_index, end_index])
+                return start_index * 1000 + end_index
+                # return np.array([start_index, end_index])
 
     def apply_action(self, action, random=False):
-        """Actions are formatted as (from, to) arrays of shape (2,).
+        """EDIT: actions are currently (temporarily) formatted as 1000 * start_index + end_index.
+        TODO: change this.
+
+        Actions are formatted as (from, to) arrays of shape (2,).
         If the action is invalid, a random one will be selected.
 
         Returns an (observation, reward, done) tuple.
@@ -330,14 +346,14 @@ class Generals(Environment):
             print('invalid action, choosing one at random')
             action = self.get_random_action()
 
-        start_index, end_index = int(round(action[0])), int(round(action[1]))
+        start_index, end_index = self._parse_action(action)
         self.attack(start_index, end_index)
 
         # Generate return info
         obs = self.prev_observation
         next_obs = self.wait_for_next_observation()
         reward = self.reward_func(obs, action, next_obs, self)
-        done = next_obs['result'] is not None
+        done = np.count_nonzero(next_obs + 2) == 0
 
         self.reward_history.append(reward)
         return next_obs, reward, done

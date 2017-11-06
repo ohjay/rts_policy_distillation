@@ -62,27 +62,24 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
     arch = config['dqn_arch']
     input_shape = arch['inputs']['observation']['shape']
-    action_dim = arch['outputs']['action']['shape'][0]
+    # num_actions = arch['outputs']['action']['shape'][0]
+    num_actions = 10000  # TODO lol :|
 
     # Set up placeholders
-    obs_t_ph = tf.placeholder(tf.uint8, [None] + list(input_shape))  # current observation (or state)
+    obs_t_ph = tf.placeholder(tf.float32, [None] + list(input_shape))  # current observation (or state)
     act_t_ph = tf.placeholder(tf.int32, [None])  # current action
     rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
-    obs_tp1_ph = tf.placeholder(tf.uint8, [None] + list(input_shape))  # next observation (or state)
+    obs_tp1_ph = tf.placeholder(tf.float32, [None] + list(input_shape))  # next observation (or state)
     done_mask_ph = tf.placeholder(tf.float32, [None])  # end of episode mask (1 if next state = end of an episode)
-
-    # Casting to float on GPU ensures lower data transfer times
-    obs_t_float = tf.cast(obs_t_ph, tf.float32) / 255.0
-    obs_tp1_float = tf.cast(obs_tp1_ph, tf.float32) / 255.0
 
     # Create networks (for current/next Q-values)
     q_func = Model(arch, inputs={'observation': obs_t_ph}, scope='q_func', reuse=False)  # model to use for computing the q-function
-    target_q_func = Model(arch, inputs={'observation': obs_tp1_float}, scope='target_q_func', reuse=False)
+    target_q_func = Model(arch, inputs={'observation': obs_tp1_ph}, scope='target_q_func', reuse=False)
     q_func_out = q_func.outputs['action']
     target_out = target_q_func.outputs['action']
 
     # Compute the Bellman error
-    q_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph, action_dim), q_func_out), axis=1)
+    q_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph, num_actions), q_func_out), axis=1)
     y_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1))
     total_error = tf.reduce_mean(tf.square(y_j - q_j))  # scalar valued tensor representing Bellman error (evaluate the current and next Q-values and construct corresponding error)
     q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')  # all vars in Q-function network
@@ -131,9 +128,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             q_values = session.run(q_func_out, feed_dict={
                 obs_t_ph: np.reshape(obs_recent, (1,) + obs_recent.shape),
             })
-            probabilities = np.full(action_dim, float(eps) / (action_dim - 1))
+            probabilities = np.full(num_actions, float(eps) / (num_actions - 1))
             probabilities[np.argmax(q_values)] = 1.0 - eps
-            action = np.random.choice(action_dim, p=probabilities)
+            action = np.random.choice(num_actions, p=probabilities)
 
         last_obs, reward, done = env.apply_action(action)
         replay_buffer.store_effect(idx, action, reward, done)

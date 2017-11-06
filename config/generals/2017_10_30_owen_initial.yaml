@@ -21,7 +21,7 @@ generals:
 dqn_arch:
   inputs:
     observation:
-      dtype: int16
+      dtype: float32
       shape: [1884]
 
   layers:
@@ -38,6 +38,6 @@ dqn_arch:
 
   outputs:
     action:
-      dtype: int16
-      shape: [2]
+      dtype: float32
+      shape: []
       activation: X
