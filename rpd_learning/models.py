@@ -90,8 +90,8 @@ class Model(object):
         outputs = fully_connected(inputs, size, activation_fn=activation_fn, biases_initializer=biases_initializer)
 
         # Loss
-        loss = output_info['loss']
-        if loss != 'tbd':
+        loss = output_info.get('loss', None)
+        if loss is not None and loss != 'tbd':
             for loss_type, weight in loss['terms'].items():
                 self.losses[output_name] = tf.constant(0.0)
                 if output_info.get('labeled', False):
@@ -103,8 +103,8 @@ class Model(object):
             tf.summary.scalar('%s/loss' % output_name, self.losses[output_name])
 
         # Optimization
-        opt = output_info['opt']
-        if opt != 'tbd':
+        opt = output_info.get('opt', None)
+        if opt is not None and opt != 'tbd':
             lr = opt.get('lr', 1e-3)
             _optimizer = tf.train.AdamOptimizer(lr)
             self.optimize[output_name] = _optimizer.minimize(self.losses[output_name])

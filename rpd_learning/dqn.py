@@ -60,9 +60,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     # BUILD MODEL #
     ###############
 
-    dqn_arch = config['dqn_arch']
-    input_shape = dqn_arch['inputs']['observation']['shape']
-    action_dim = dqn_arch['outputs']['action']['shape'][0]
+    arch = config['dqn_arch']
+    input_shape = arch['inputs']['observation']['shape']
+    action_dim = arch['outputs']['action']['shape'][0]
 
     # Set up placeholders
     obs_t_ph = tf.placeholder(tf.uint8, [None] + list(input_shape))  # current observation (or state)
@@ -76,7 +76,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     obs_tp1_float = tf.cast(obs_tp1_ph, tf.float32) / 255.0
 
     # Create networks (for current/next Q-values)
-    arch = config['dqn_arch']
     q_func = Model(arch, inputs={'observation': obs_t_ph}, scope='q_func', reuse=False)  # model to use for computing the q-function
     target_q_func = Model(arch, inputs={'observation': obs_tp1_float}, scope='target_q_func', reuse=False)
     q_func_out = q_func.outputs['action']

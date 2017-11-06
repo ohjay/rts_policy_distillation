@@ -50,7 +50,7 @@ def train(config, env):
               learning_starts=50000, learning_freq=4, frame_history_len=1, target_update_freq=10000, grad_norm_clipping=10)
     env.close()
 
-def test(env):
+def test(config, env):
     for update in env.get_updates():
         observation = env.extract_observation(update)
 

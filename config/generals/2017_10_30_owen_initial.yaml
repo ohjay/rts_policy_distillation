@@ -41,6 +41,3 @@ dqn_arch:
       dtype: int16
       shape: [2]
       activation: X
-      labeled: False
-      loss: tbd
-      opt: tbd
