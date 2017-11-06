@@ -188,3 +188,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             print('exploration %f' % exploration.value(t))
             print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
             sys.stdout.flush()
+
+            # Save network parameters
+            q_func.save(session, t, outfolder='q_func')
+            target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both

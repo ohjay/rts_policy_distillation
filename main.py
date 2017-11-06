@@ -22,7 +22,7 @@ def get_session():
         inter_op_parallelism_threads=1,
         intra_op_parallelism_threads=1)
     session = tf.Session(config=tf_config)
-    print("AVAILABLE GPUS: ", get_available_gpus())
+    print("AVAILABLE GPUs: ", get_available_gpus())
     return session
 
 def train(env, config):
