@@ -8,7 +8,7 @@ Utilities for constructing a model.
 
 import os
 import tensorflow as tf
-from tensorflow.contrib.layers import fully_connected
+from tensorflow.contrib.layers import fully_connected, conv2d
 
 class Model(object):
     def __init__(self, arch, inputs=None, scope=None, reuse=False):
@@ -62,7 +62,6 @@ class Model(object):
                     for j in range(len(inputs)):
                         if type(inputs[j]) == str:
                             inputs[j] = self.inputs[inputs[j]]
-                    size = layer['size']
                     try:
                         activation_fn = getattr(tf.nn, layer['activation'])
                     except AttributeError:
@@ -71,9 +70,16 @@ class Model(object):
 
                     layer_type = layer['type']
                     if layer_type == 'fc':
+                        size = layer['size']
                         inputs = tf.concat(inputs, axis=1)
                         outputs[i].append(fully_connected(inputs, size, activation_fn=activation_fn,
                                                           biases_initializer=biases_initializer))
+                    elif layer_type == 'conv':
+                        num_outputs = layer['num_outputs']
+                        kernel_size = layer['kernel_size']
+                        stride = layer['stride']
+                        outputs[i].append(conv2d(inputs, num_outputs, kernel_size, 
+                                                 stride=stride, activation_fn=activation_fn, biases_initializer=biases_initializer))
                     else:
                         raise NotImplementedError
         return outputs

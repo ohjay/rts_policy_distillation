@@ -276,7 +276,7 @@ class Generals(Environment):
     def _parse_action(action):
         """Grabs (start_index, end_index) from ACTION."""
         # start_index, end_index = int(round(action[0])), int(round(action[1]))
-        start_index, end_index = int(action) // 1000, int(action) % 1000
+            start_index, end_index = int(action) // 1000, int(action) % 1000
         return start_index, end_index
 
     def _valid(self, action):

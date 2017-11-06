@@ -41,7 +41,7 @@ def train(env, config):
         constructor=tf.train.AdamOptimizer, kwargs=dict(epsilon=1e-4), lr_schedule=lr_schedule)
 
     def stopping_criterion(env, t):
-        return t > 8e7  # TODO idk
+        return t > 300  # TODO idk
 
     exploration_schedule = PiecewiseSchedule([(0, 0.2), (1e6, 0.1), (num_iterations / 2, 0.01)], outside_value=0.01)
 
