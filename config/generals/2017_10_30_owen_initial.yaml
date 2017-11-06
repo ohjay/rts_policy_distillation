@@ -14,3 +14,33 @@ operation: train  # (train,)
 generals:
   user_id: Byd0qf4R-
   mode: 1v1
+
+# MODEL ARCHITECTURE
+# ------------------
+
+dqn_arch:
+  inputs:
+    observation:
+      dtype: int16
+      shape: [1884]
+
+  layers:
+    - inputs: [observation]
+      type: fc
+      size: 256
+      activation: relu
+    - type: fc
+      size: 128
+      activation: relu
+    - type: fc
+      size: 64
+      activation: relu
+
+  outputs:
+    action:
+      dtype: int16
+      shape: [2]
+      activation: X
+      labeled: False
+      loss: tbd
+      opt: tbd

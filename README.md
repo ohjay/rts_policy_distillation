@@ -6,3 +6,8 @@ Training agents to play real-time strategy games using policy distillation.
 ```
 python setup.py develop
 ```
+
+## Usage
+```
+python main.py -cfg <path to config>
+```

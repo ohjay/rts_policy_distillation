@@ -6,10 +6,10 @@ from rpd_interfaces.generals import generals
 
 def run_random_agent():
     user_id = os.environ['GENERALS_UID']
-    iface = generals.Generals(user_id)
-    iface.join_game('1v1')
+    env = generals.Generals(user_id)
+    env.join_game('1v1')
 
-    for update in iface.get_updates():
+    for update in env.get_updates():
         # Check if the game is over
         if update['result'] is not None:
             print(update['result'])
@@ -25,7 +25,7 @@ def run_random_agent():
             start_index = randint(0, size - 1)
 
             # If we own the tile, make a random move starting from it
-            if terrain[start_index] == iface.player_index:
+            if terrain[start_index] == env.player_index:
                 row = start_index // width
                 col = start_index % width
                 end_index = start_index
@@ -46,7 +46,7 @@ def run_random_agent():
                 if end_index in cities:
                     continue
 
-                iface.attack(start_index, end_index)
+                env.attack(start_index, end_index)
                 break
 
 if __name__ == '__main__':

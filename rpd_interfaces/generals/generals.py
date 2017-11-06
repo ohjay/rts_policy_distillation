@@ -9,9 +9,12 @@ Interface for generals.io. Borrows from https://github.com/toshima/generalsio.
 import json
 import time
 import threading
+import collections
 import numpy as np
+from random import randint, random
 from websocket import create_connection, WebSocketConnectionClosedException
-from rpd_interfaces.interfaces import Interface
+from rpd_interfaces.interfaces import Environment
+from rpd_interfaces.generals.reward import rew_total_land_dt
 
 # Terrain constants
 # -----------------
@@ -24,6 +27,8 @@ TILE_FOG_OBSTACLE = -4  # cities and mountains show up as obstacles in the fog o
 # -----------------
 SERVER_ENDPOINT = 'ws://botws.generals.io/socket.io/?EIO=3&transport=websocket'
 REPLAY_URL_BASE = 'http://bot.generals.io/replays/'
+_INVALID = 2
+MODE_DEFAULT = '1v1'
 
 class Client(object):
     def __init__(self, endpoint):
@@ -63,8 +68,8 @@ class Client(object):
         """Close the socket."""
         self._ws.close()
 
-class Generals(Interface):
-    def __init__(self, user_id):
+class Generals(Environment):
+    def __init__(self, user_id, reward_func=rew_total_land_dt, reward_history_cap=1000):
         self.client = Client(SERVER_ENDPOINT)
         self.user_id = user_id
 
@@ -73,9 +78,20 @@ class Generals(Interface):
         self.player_index = -1
         self.cities = []
         self.map = []
+        self.terrain = None
         self.stars = []
         self.active = False
         self.move_id = 1
+        self.prev_mode = None
+
+        # Learning-related info
+        self.prev_observation = None
+        self.reward_func = reward_func
+        self.reward_history = collections.deque(maxlen=reward_history_cap)
+
+    def close(self):
+        """Close and clean up the environment."""
+        self.client.close()
 
     def set_username(self, username):
         """Remember: this should only be set once."""
@@ -100,11 +116,21 @@ class Generals(Interface):
         # Always force start
         self.client.send(['set_force_start', game_id, True])
 
+        self.prev_mode = mode
         print('waiting to join a %s game' % mode)
 
     def leave_game(self):
         """For rage quits and such."""
         self.client.send(['leave_game'])
+
+    def reset(self, mode=None):
+        """Reset game. This just means starting a new one."""
+        if mode is None:
+            mode = self.prev_mode or MODE_DEFAULT
+        self.join_game(mode)
+
+        # Wait until we have our first observation, then return it
+        return self.wait_for_next_observation()
 
     def get_updates(self):
         while True:
@@ -157,7 +183,7 @@ class Generals(Interface):
 
         # Extract army and terrain values
         armies = self.map[2:size+2]
-        terrain = self.map[size+2:size+2+size]
+        self.terrain = self.map[size+2:size+2+size]
 
         turn = data['turn']
         scores = data['scores']
@@ -172,11 +198,16 @@ class Generals(Interface):
             'height': height,
             'size': size,
             'armies': armies,  # quantities of army units for each square
-            'terrain': terrain,  # type of each square (-4, -3, -2, -1, or a player index indicating ownership)
+            'terrain': self.terrain,  # type of each square (-4, -3, -2, -1, or a player index indicating ownership)
             'turn': turn,
             'scores': scores,  # list of dictionaries containing score information for each player
             'cities': self.cities,
         }
+
+    def wait_for_next_observation(self):
+        for update in self.get_updates():
+            if type(update) == dict and update['result'] is None:
+                return self.extract_observation(update)
 
     @staticmethod
     def patch(old, diff):
@@ -190,12 +221,123 @@ class Generals(Interface):
             i += 1
         return out
 
+    @staticmethod
+    def _pad(lst, val, size):
+        """Destructively right-pad a list with VAL until its length is equal to SIZE.
+        Return said list.
+        """
+        lst.extend([val] * (size - len(lst)))
+        return lst
+
     def extract_observation(self, update):
-        """Return an observation as a tensor."""
-        return np.array(self.map)  # TODO
+        """Returns an observation as a tensor.
+
+        For generals.io, an observation is a (1884,) NumPy array
+        with the following contents at the following indices:
+
+        - index 0: width of the map
+        - index 1: turn number
+        - indices 2-9: general positions (-1 indicates "unknown")
+        - indices 10-33: (# tiles, # units, 0 if dead else 1) for each of eight potential players, ordered by index
+        - indices 34-83: ordered list of city indices
+        - indices 84-983: terrain info for each square, encoded as an integer from -4 to 7
+        - indices 984-1883: quantities of army units for each square index
+
+        Whenever applicable, -2 indicates "nonexistent / invalid".
+        Maximum capacity is eight players and a 30x30 map.
+        """
+        _scores = []
+        for s in update['scores']:
+            _scores.extend([s['tiles'], s['total'], 1 - int(s['dead'])])
+        observation = np.array(
+            [update['width']] +
+            [update['turn']] +
+            self._pad(update['generals'], _INVALID, 8) +
+            self._pad(_scores, _INVALID, 24) +
+            self._pad(update['cities'], _INVALID, 30) +
+            self._pad(update['terrain'], _INVALID, 900) +
+            self._pad(update['armies'], _INVALID, 900)
+        ).astype(np.int16)  # the only things outside of byte range are scores
+        self.prev_observation = observation
+        return observation
 
     def attack(self, start_index, end_index, is_half=False):
         if not self.active:
             raise ValueError('no updates have been received')
         self.client.send(['attack', start_index, end_index, is_half, self.move_id])
         self.move_id += 1
+
+    def _valid(self, action):
+        """Returns True if the given action is currently valid."""
+        start_index, end_index = int(round(action[0])), int(round(action[1]))
+        if self.terrain[start_index] != self.player_index:
+            return False
+        width, height = self.map[0], self.map[1]
+        row = start_index // width
+        col = start_index % width
+        if end_index == start_index - 1:
+            return col > 0
+        if end_index == start_index + 1:
+            return col < width - 1
+        if end_index == start_index + width:
+            return row < height - 1
+        if end_index == start_index - width:
+            return row > 0
+        return False
+
+    def get_random_action(self):
+        """Get a random move."""
+        width, height = self.map[0], self.map[1]
+        size = width * height
+
+        while True:
+            # Pick a random tile
+            start_index = randint(0, size - 1)
+
+            # If we own the tile, make a random move starting from it
+            if self.terrain[start_index] == self.player_index:
+                row = start_index // width
+                col = start_index % width
+                end_index = start_index
+
+                rand = random()
+                if rand < 0.25 and col > 0:
+                    end_index -= 1  # left
+                elif rand < 0.5 and col < width - 1:
+                    end_index += 1  # right
+                elif rand < 0.75 and row < height - 1:
+                    end_index += width  # down
+                elif row > 0:
+                    end_index -= width
+                else:
+                    continue
+
+                return np.array([start_index, end_index])
+
+    def apply_action(self, action, random=False):
+        """Actions are formatted as (from, to) arrays of shape (2,).
+        If the action is invalid, a random one will be selected.
+
+        Returns an (observation, reward, done) tuple.
+
+        TODO: potential representations
+        (1) (int, int) from/to tuple (when applying, can round to nearest)
+        (2) (900 + 900,) array of 0s and 1s (when applying, can use argmax for each of from/to ranges
+
+        TODO: incorporate 50% moves
+        """
+        if not self._valid(action):
+            print('invalid action, choosing one at random')
+            action = self.get_random_action()
+
+        start_index, end_index = int(round(action[0])), int(round(action[1]))
+        self.attack(start_index, end_index)
+
+        # Generate return info
+        obs = self.prev_observation
+        next_obs = self.wait_for_next_observation()
+        reward = self.reward_func(obs, action, next_obs, self)
+        done = next_obs['result'] is not None
+
+        self.reward_history.append(reward)
+        return next_obs, reward, done
