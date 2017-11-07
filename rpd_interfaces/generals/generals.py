@@ -10,9 +10,8 @@ import json
 import time
 import threading
 import collections
-import warnings
 import numpy as np
-from random import randint, random
+from random import randint
 from websocket import create_connection, WebSocketConnectionClosedException
 from rpd_interfaces.interfaces import Environment
 from rpd_interfaces.generals.reward import rew_total_land_dt
@@ -269,16 +268,15 @@ class Generals(Environment):
     def extract_observation(self, update):
         """Returns an observation as a tensor.
 
-        For generals.io, an observation is a (1884,) NumPy array
-        with the following contents at the following indices:
-
-        - index 0: width of the map
-        - index 1: turn number
-        - indices 2-9: general positions (-1 indicates "unknown")
-        - indices 10-33: (# tiles, # units, 0 if dead else 1) for each of eight potential players, ordered by index
-        - indices 34-83: ordered list of city indices
-        - indices 84-983: terrain info for each square, encoded as an integer from -4 to 7
-        - indices 984-1883: quantities of army units for each square index
+        For generals.io, an observation is a dictionary of NumPy arrays, structured as follows:
+        - 'terrain' [shape (30, 30, 1)]: the terrain map
+        - 'ownership' [shape (30, 30, 1)]: the ownership map
+        - 'armies' [shape (30, 30, 1)]: the army map
+        - 'other' [shape 34]:
+          - index 0: width of the map
+          - index 1: turn number
+          - indices 2-9: general positions (-1 indicates "unknown")
+          - indices 10-33: (# tiles, # units, 0 if dead else 1) for each of eight potential players, ordered by index
 
         Whenever applicable, -2 indicates "nonexistent / invalid".
         Maximum capacity is eight players and a 30x30 map.
@@ -362,10 +360,8 @@ class Generals(Environment):
         return randint(0, 4)
 
     def apply_action(self, action, random=False):
-        """EDIT: actions are currently formatted as (5,) one-hot arrays representing the choice of move.
-
-        Actions are formatted as (from, to) arrays of shape (2,).
-        If the action is invalid, a random one will be selected.
+        """Actions are formatted as integers from 0-4 representing the choice of move (up, down, left, right, noop).
+        If the action is invalid, nothing will be done.
 
         Returns an (observation, reward, done) tuple.
 
@@ -387,7 +383,7 @@ class Generals(Environment):
         obs = self.prev_observation
         next_obs = self.wait_for_next_observation()
         reward = self.reward_func(obs, action, next_obs, self)
-        done = np.count_nonzero(next_obs['other'] - 9) == 0
+        done = np.count_nonzero(next_obs['other'] - _INVALID) == 0
 
         self.reward_history.append(reward)
         return next_obs, reward, done
