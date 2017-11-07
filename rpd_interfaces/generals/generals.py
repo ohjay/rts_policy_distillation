@@ -22,6 +22,15 @@ TILE_EMPTY = -1
 TILE_MOUNTAIN = -2
 TILE_FOG = -3
 TILE_FOG_OBSTACLE = -4  # cities and mountains show up as obstacles in the fog of war
+TILE_CITY = -5
+
+# Action constants
+# ----------------
+ACTION_UP = 0
+ACTION_DOWN = 1
+ACTION_LEFT = 2
+ACTION_RIGHT = 3
+ACTION_NOOP = 4
 
 # General constants
 # -----------------
@@ -249,20 +258,33 @@ class Generals(Environment):
         """
         if update['result'] is not None:
             # TODO this needs to represent a high-reward observation if we win, and vice-versa if we lose
-            return np.full(1884, -2, np.int32)
+            return {
+                'image': np.full(2700, -2, np.int32),
+                'other': np.full(34, -2, np.int32),
+            }
 
         _scores = []
         for s in update['scores']:
             _scores.extend([s['tiles'], s['total'], 1 - int(s['dead'])])
-        observation = np.array(
-            [update['width']] +
-            [update['turn']] +
-            self._pad(update['generals'], _INVALID, 8) +
-            self._pad(_scores, _INVALID, 24) +
-            self._pad(update['cities'], _INVALID, 30) +
-            self._pad(update['terrain'], _INVALID, 900) +
-            self._pad(update['armies'], _INVALID, 900)
-        ).astype(np.int32)  # the only things outside of byte range are scores
+
+        terrain = []
+        ownership = [max(-1, id) for id in update['terrain']]
+        for city_index in update['cities']:
+            terrain[city_index] = TILE_CITY
+
+        observation = {
+            'image': np.array(
+                self._pad(terrain, _INVALID, 900) +
+                self._pad(ownership, _INVALID, 900) +
+                self._pad(update['armies'], _INVALID, 900)
+            ).astype(np.int32),
+            'other': np.array(
+                [update['width']] +
+                [update['turn']] +
+                self._pad(update['generals'], _INVALID, 8) +
+                self._pad(_scores, _INVALID, 24)
+            ).astype(np.int32),
+        }
         self.prev_observation = observation
         return observation
 

@@ -61,20 +61,42 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     ###############
 
     arch = config['dqn_arch']
-    input_shape = arch['inputs']['observation']['shape']
-    # num_actions = arch['outputs']['action']['shape'][0]
-    num_actions = 10000  # TODO lol :|
+    num_actions = arch['outputs']['action']['shape'][0]
+
+    def _obs_to_np(obs):
+        """Reformats observation as a single NumPy array.
+        An observation, at least from the RPD interface, will be given as an {input_name: value} dict.
+        """
+        return np.concatenate([obs[input_name] for input_name in sorted(arch['inputs'].keys())])
+
+    def _np_to_obs(obs_np):
+        """Separates observation into individual inputs (the {input_name: value} dict it was originally).
+        This the inverse of `_obs_to_np`.
+        """
+        obs = {}
+        i = 0
+        for input_name in sorted(arch['inputs'].keys()):
+            size = arch['inputs'][input_name]['shape'][0]
+            obs[input_name] = obs_np[i:i+size]
+            i += size
+        return obs
 
     # Set up placeholders
-    obs_t_ph = tf.placeholder(tf.float32, [None] + list(input_shape))  # current observation (or state)
+    obs_t_ph = {input_name: None for input_name in arch['inputs'].keys()}  # current observation (or state)
+    for input_name in obs_t_ph:
+        info = arch['inputs'][input_name]['dtype']
+        obs_t_ph[input_name] = tf.placeholder(getattr(tf, info['dtype']), [None] + list(info['shape']))
     act_t_ph = tf.placeholder(tf.int32, [None])  # current action
     rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
-    obs_tp1_ph = tf.placeholder(tf.float32, [None] + list(input_shape))  # next observation (or state)
+    obs_tp1_ph = {input_name: None for input_name in arch['inputs'].keys()}  # next observation (or state)
+    for input_name in obs_tp1_ph:
+        info = arch['inputs'][input_name]['dtype']
+        obs_tp1_ph[input_name] = tf.placeholder(getattr(tf, info['dtype']), [None] + list(info['shape']))
     done_mask_ph = tf.placeholder(tf.float32, [None])  # end of episode mask (1 if next state = end of an episode)
 
     # Create networks (for current/next Q-values)
-    q_func = Model(arch, inputs={'observation': obs_t_ph}, scope='q_func', reuse=False)  # model to use for computing the q-function
-    target_q_func = Model(arch, inputs={'observation': obs_tp1_ph}, scope='target_q_func', reuse=False)
+    q_func = Model(arch, inputs=obs_t_ph, scope='q_func', reuse=False)  # model to use for computing the q-function
+    target_q_func = Model(arch, inputs=obs_tp1_ph, scope='target_q_func', reuse=False)
     q_func_out = q_func.outputs['action']
     target_out = target_q_func.outputs['action']
 
@@ -108,7 +130,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     num_param_updates = 0
     mean_episode_reward = -float('nan')
     best_mean_episode_reward = -float('inf')
-    last_obs = env.reset()
+    last_obs_np = _obs_to_np(env.reset())
     log_freq = 10000
 
     for t in itertools.count():
@@ -117,28 +139,31 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             break
 
         # 2. Step the env and store the transition in the replay buffer
-        idx = replay_buffer.store_frame(last_obs)
+        idx = replay_buffer.store_frame(last_obs_np)
         if not model_initialized:
             # If first step, choose a random action
             action = env.get_random_action()
         else:
             # Choose action via epsilon greedy exploration
             eps = exploration.value(t)
-            obs_recent = replay_buffer.encode_recent_observation()
-            q_values = session.run(q_func_out, feed_dict={
-                obs_t_ph: np.reshape(obs_recent, (1,) + obs_recent.shape),
-            })
+            obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
+            feed_dict = {}
+            for input_name in obs_recent.keys():
+                shaped_val = np.reshape(obs_recent[input_name], (1,) + obs_recent[input_name].shape)
+                feed_dict[obs_t_ph[input_name]] = shaped_val
+            q_values = session.run(q_func_out, feed_dict=feed_dict)
             probabilities = np.full(num_actions, float(eps) / (num_actions - 1))
             probabilities[np.argmax(q_values)] = 1.0 - eps
             action = np.random.choice(num_actions, p=probabilities)
 
         last_obs, reward, done = env.apply_action(action)
+        last_obs_np = _obs_to_np(last_obs)
         replay_buffer.store_effect(idx, action, reward, done)
         if done:
-            last_obs = env.reset()
+            last_obs_np = _obs_to_np(env.reset())
 
         # At this point, the environment should have been advanced one step (and
-        # reset if done was true), last_obs should point to the new latest observation,
+        # reset if done was true), last_obs_np should point to the new latest observation,
         # and the replay buffer should contain one more transition.
 
         # 3. Perform experience replay and train the network.
@@ -147,25 +172,24 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         # initialized and random actions should be taken
         if t > learning_starts and t % learning_freq == 0 and replay_buffer.can_sample(batch_size):
             # Use replay buffer to sample a batch of transitions
-            obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = replay_buffer.sample(batch_size)
+            obs_batch_np, act_batch, rew_batch, next_obs_batch_np, done_mask = replay_buffer.sample(batch_size)
+            obs_batch = _np_to_obs(obs_batch_np)
+            next_obs_batch = _np_to_obs(next_obs_batch_np)
 
             # Initialize the model
             if not model_initialized:
-                initialize_interdependent_variables(session, tf.global_variables(), {
-                    obs_t_ph: obs_batch,
-                    obs_tp1_ph: next_obs_batch,
-                })
+                initialize_interdependent_variables(session, tf.global_variables(), merge_dicts(
+                    {obs_t_ph[input_name]: obs_batch[input_name] for input_name in obs_batch.keys()},
+                    {obs_tp1_ph[input_name]: next_obs_batch[input_name] for input_name in next_obs_batch.keys()}
+                ))
                 model_initialized = True
 
             # Train the model
-            session.run(train_fn, feed_dict={
-                obs_t_ph: obs_batch,
-                act_t_ph: act_batch,
-                rew_t_ph: rew_batch,
-                obs_tp1_ph: next_obs_batch,
-                done_mask_ph: done_mask,
-                learning_rate: optimizer_spec.lr_schedule.value(t),
-            })
+            session.run(train_fn, merge_dicts(
+                {obs_t_ph[input_name]: obs_batch[input_name] for input_name in obs_batch.keys()},
+                {obs_tp1_ph[input_name]: next_obs_batch[input_name] for input_name in next_obs_batch.keys()},
+                {act_t_ph: act_batch, rew_t_ph: rew_batch, done_mask_ph: done_mask, learning_rate: optimizer_spec.lr_schedule.value(t)}
+            ))
 
             # Periodically update the target network
             if num_param_updates % target_update_freq == 0:

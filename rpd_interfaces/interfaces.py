@@ -14,7 +14,7 @@ class Environment(object):
         raise NotImplementedError('abstract generator method for getting real-time updates')
 
     def extract_observation(self, update):
-        raise NotImplementedError('abstract method for parsing observations from updates')
+        raise NotImplementedError('abstract method for parsing {input_name: value} observations from updates')
 
     def get_random_action(self):
         raise NotImplementedError('sample a random action from the environment')
