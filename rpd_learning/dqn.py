@@ -7,7 +7,8 @@ Deep Q-network as described by CS 294-112 (goo.gl/MhA4eA).
 """
 
 import sys
-import itertools
+import operator
+import functools, itertools
 import tensorflow as tf
 from collections import namedtuple
 
@@ -67,7 +68,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         """Reformats observation as a single NumPy array.
         An observation, at least from the RPD interface, will be given as an {input_name: value} dict.
         """
-        return np.concatenate([obs[input_name] for input_name in sorted(arch['inputs'].keys())])
+        return np.concatenate([obs[input_name].flatten() for input_name in sorted(arch['inputs'].keys())])
 
     def _np_to_obs(obs_np):
         """Separates observation into individual inputs (the {input_name: value} dict it was originally).
@@ -76,27 +77,40 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         obs = {}
         i = 0
         for input_name in sorted(arch['inputs'].keys()):
-            size = arch['inputs'][input_name]['shape'][0]
-            obs[input_name] = obs_np[i:i+size]
+            shape = arch['inputs'][input_name]['shape']
+            size = functools.reduce(operator.mul, shape, 1)
+            obs[input_name] = np.reshape(obs_np[i:i+size], shape)
             i += size
         return obs
 
     # Set up placeholders
     obs_t_ph = {input_name: None for input_name in arch['inputs'].keys()}  # current observation (or state)
+    obs_t_ph_float = {input_name: None for input_name in arch['inputs'].keys()}
     for input_name in obs_t_ph:
-        info = arch['inputs'][input_name]['dtype']
-        obs_t_ph[input_name] = tf.placeholder(getattr(tf, info['dtype']), [None] + list(info['shape']))
+        info = arch['inputs'][input_name]
+        dtype, shape = info['dtype'], info['shape']
+        obs_t_ph[input_name] = tf.placeholder(getattr(tf, dtype), [None] + list(shape))
+        if dtype == 'float32':
+            obs_t_ph_float[input_name] = obs_t_ph[input_name]
+        else:  # casting to float on GPU ensures lower data transfer times
+            obs_t_ph_float[input_name] = tf.cast(obs_t_ph[input_name], tf.float32) / 255.0
     act_t_ph = tf.placeholder(tf.int32, [None])  # current action
     rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
     obs_tp1_ph = {input_name: None for input_name in arch['inputs'].keys()}  # next observation (or state)
+    obs_tp1_ph_float = {input_name: None for input_name in arch['inputs'].keys()}
     for input_name in obs_tp1_ph:
-        info = arch['inputs'][input_name]['dtype']
-        obs_tp1_ph[input_name] = tf.placeholder(getattr(tf, info['dtype']), [None] + list(info['shape']))
+        info = arch['inputs'][input_name]
+        dtype, shape = info['dtype'], info['shape']
+        obs_tp1_ph[input_name] = tf.placeholder(getattr(tf, dtype), [None] + list(shape))
+        if dtype == 'float32':
+            obs_tp1_ph_float[input_name] = obs_tp1_ph[input_name]
+        else:
+            obs_tp1_ph_float[input_name] = tf.cast(obs_tp1_ph[input_name], tf.float32) / 255.0
     done_mask_ph = tf.placeholder(tf.float32, [None])  # end of episode mask (1 if next state = end of an episode)
 
     # Create networks (for current/next Q-values)
-    q_func = Model(arch, inputs=obs_t_ph, scope='q_func', reuse=False)  # model to use for computing the q-function
-    target_q_func = Model(arch, inputs=obs_tp1_ph, scope='target_q_func', reuse=False)
+    q_func = Model(arch, inputs=obs_t_ph_float, scope='q_func', reuse=False)  # model to use for computing the q-function
+    target_q_func = Model(arch, inputs=obs_tp1_ph_float, scope='target_q_func', reuse=False)
     q_func_out = q_func.outputs['action']
     target_out = target_q_func.outputs['action']
 

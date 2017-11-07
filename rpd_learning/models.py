@@ -8,7 +8,7 @@ Utilities for constructing a model.
 
 import os
 import tensorflow as tf
-from tensorflow.contrib.layers import fully_connected, convolution2d
+from tensorflow.contrib.layers import fully_connected, convolution2d, flatten
 
 class Model(object):
     def __init__(self, arch, inputs=None, scope=None, reuse=False):
@@ -81,6 +81,9 @@ class Model(object):
                         outputs[i].append(convolution2d(inputs, size, kernel_size=layer['kernel_size'],
                                                         stride=layer['stride'], activation_fn=activation_fn,
                                                         biases_initializer=biases_initializer))
+                        if i < len(layers) and layers[i + 1]['type'] == 'fc':
+                            # If the next layer is a fully connected layer, we need to flatten this output
+                            outputs[i][-1] = flatten(outputs[i][-1])
                     else:
                         raise NotImplementedError
         return outputs

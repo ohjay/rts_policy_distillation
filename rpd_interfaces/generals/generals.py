@@ -37,8 +37,15 @@ ACTION_NOOP = 4
 # -----------------
 SERVER_ENDPOINT = 'ws://botws.generals.io/socket.io/?EIO=3&transport=websocket'
 REPLAY_URL_BASE = 'http://bot.generals.io/replays/'
-_INVALID = 2
+_INVALID = 9
 MODE_DEFAULT = '1v1'
+
+_INVALID_OBS = {
+    'terrain': np.full((30, 30, 1), _INVALID, np.uint8),
+    'ownership': np.full((30, 30, 1), _INVALID, np.uint8),
+    'armies': np.full((30, 30, 1), _INVALID, np.uint8),
+    'other': np.full(34, _INVALID, np.uint8),
+}
 
 class Client(object):
     def __init__(self, endpoint):
@@ -86,15 +93,19 @@ class Generals(Environment):
         # Game data
         self.meta = {}  # playerIndex, replay_id, chat_room, team_chat_room, usernames, teams
         self.player_index = -1
+        self.general_sq = -1
         self.cities = []
         self.map = []
         self.width, self.height = -1, -1
+        self.armies = None
         self.terrain = None
         self.stars = []
         self.active = False
         self.move_id = 1
         self.prev_mode = None
         self.active_sq = None
+        self.turn = -1
+        self.turn_throttle = -1
 
         # Learning-related info
         self.prev_observation = None
@@ -129,6 +140,8 @@ class Generals(Environment):
         self.client.send(['set_force_start', game_id, True])
 
         self.prev_mode = mode
+        self.active = False
+        self.active_sq = None
         print('waiting to join a %s game' % mode)
 
     def leave_game(self):
@@ -174,7 +187,7 @@ class Generals(Environment):
                 # Contents: turn, map_diff, cities_diff, generals, scores, stars
                 yield self.process_update(msg[1])
             elif msg[0] in {'game_won', 'game_lost'}:
-                yield self.process_update(msg[0], result=msg[1])
+                yield self.process_update(msg[1], result=msg[0])
                 break
             else:
                 print('unknown message type: {}'.format(msg))
@@ -186,7 +199,9 @@ class Generals(Environment):
 
         self.active = True
         if self.active_sq is None:
-            self.active_sq = data['generals'][self.player_index]
+            self.general_sq = data['generals'][self.player_index]
+            self.active_sq = self.general_sq
+            print('[i] general square: %d' % self.general_sq)
 
         self.cities = self.patch(self.cities, data['cities_diff'])  # currently visible cities
         self.map = self.patch(self.map, data['map_diff'])  # current map state (dimensions, armies, terrain)
@@ -196,10 +211,10 @@ class Generals(Environment):
         size = self.width * self.height
 
         # Extract army and terrain values
-        armies = self.map[2:size+2]
+        self.armies = self.map[2:size+2]
         self.terrain = self.map[size+2:size+2+size]
 
-        turn = data['turn']
+        self.turn = data['turn']
         scores = data['scores']
 
         if 'stars' in data:
@@ -211,9 +226,9 @@ class Generals(Environment):
             'width': self.width,
             'height': self.height,
             'size': size,
-            'armies': armies,  # quantities of army units for each square
+            'armies': self.armies,  # quantities of army units for each square
             'terrain': self.terrain,  # type of each square (-4, -3, -2, -1, or a player index indicating ownership)
-            'turn': turn,
+            'turn': self.turn,
             'scores': scores,  # list of dictionaries containing score information for each player
             'cities': self.cities,
         }
@@ -222,7 +237,7 @@ class Generals(Environment):
         for update in self.get_updates():
             if type(update) == dict and update['result'] is None:
                 return self.extract_observation(update)
-        return np.full(1884, -2, np.int32)  # done
+        return _INVALID_OBS  # done
 
     @staticmethod
     def patch(old, diff):
@@ -244,6 +259,13 @@ class Generals(Environment):
         lst.extend([val] * (size - len(lst)))
         return lst
 
+    @staticmethod
+    def _pad2d(arr, val, des_shape):
+        """Pad a 2D array with VAL s.t. its final dimensions are (DES_SHAPE[0], DES_SHAPE[1])."""
+        final = np.full(des_shape, val)
+        final[:arr.shape[0], :arr.shape[1]] = arr
+        return final
+
     def extract_observation(self, update):
         """Returns an observation as a tensor.
 
@@ -263,32 +285,29 @@ class Generals(Environment):
         """
         if update['result'] is not None:
             # TODO this needs to represent a high-reward observation if we win, and vice-versa if we lose
-            return {
-                'image': np.full(2700, -2, np.int32),
-                'other': np.full(34, -2, np.int32),
-            }
+            return _INVALID_OBS
 
         _scores = []
         for s in update['scores']:
             _scores.extend([s['tiles'], s['total'], 1 - int(s['dead'])])
 
-        terrain = []
-        ownership = [max(-1, id) for id in update['terrain']]
+        terrain = update['terrain']
+        ownership = np.reshape([max(-1, id) for id in update['terrain']], (self.height, self.width))
         for city_index in update['cities']:
             terrain[city_index] = TILE_CITY
+        terrain = np.reshape(terrain, (self.height, self.width))
+        armies = np.reshape(update['armies'], (self.height, self.width))
 
         observation = {
-            'image': np.array(
-                self._pad(terrain, _INVALID, 900) +
-                self._pad(ownership, _INVALID, 900) +
-                self._pad(update['armies'], _INVALID, 900)
-            ).astype(np.int32),
+            'terrain': self._pad2d(terrain, _INVALID, (30, 30))[:, :, None],
+            'ownership': self._pad2d(ownership, _INVALID, (30, 30))[:, :, None],
+            'armies': self._pad2d(armies, _INVALID, (30, 30))[:, :, None],
             'other': np.array(
                 [update['width']] +
                 [update['turn']] +
                 self._pad(update['generals'], _INVALID, 8) +
                 self._pad(_scores, _INVALID, 24)
-            ).astype(np.int32),
+            ).astype(np.float32),
         }
         self.prev_observation = observation
         return observation
@@ -296,32 +315,35 @@ class Generals(Environment):
     def attack(self, start_index, end_index, is_half=False):
         if not self.active:
             raise ValueError('no updates have been received')
-        self.client.send(['attack', start_index, end_index, is_half, self.move_id])
-        self.move_id += 1
-        self.active_sq = end_index
+        if self.turn > self.turn_throttle:
+            self.active_sq = end_index
+            if self._valid(start_index, end_index):
+                self.client.send(['attack', start_index, end_index, is_half, self.move_id])
+                self.move_id += 1
+            self.turn_throttle = self.turn
 
     def _parse_action(self, action):
-        """Grabs (start_index, end_index) from ACTION."""
+        """Obtains the (start_index, end_index) encoded by ACTION."""
         # start_index, end_index = int(round(action[0])), int(round(action[1]))
         # start_index, end_index = int(action) // 1000, int(action) % 1000
 
         end_index = None
-        if action[ACTION_UP]:
+        if action == ACTION_UP:
             end_index = self.active_sq - self.width
-        elif action[ACTION_DOWN]:
+        elif action == ACTION_DOWN:
             end_index = self.active_sq + self.width
-        elif action[ACTION_LEFT]:
+        elif action == ACTION_LEFT:
             end_index = self.active_sq - 1
-        elif action[ACTION_RIGHT]:
+        elif action == ACTION_RIGHT:
             end_index = self.active_sq + 1
 
         return self.active_sq, end_index
 
-    def _valid(self, action):
+    def _valid(self, start_index, end_index):
         """Returns True if the given action is currently valid."""
-        warnings.warn('deprecated', DeprecationWarning)
-        start_index, end_index = self._parse_action(action)
-        if self.terrain[start_index] != self.player_index:
+        if self.terrain[start_index] != self.player_index or self.armies[start_index] < 2:
+            return False
+        if self.terrain[end_index] in (TILE_MOUNTAIN, TILE_FOG_OBSTACLE):
             return False
         row = start_index // self.width
         col = start_index % self.width
@@ -337,9 +359,7 @@ class Generals(Environment):
 
     def get_random_action(self):
         """Get a random move."""
-        action = np.zeros(5)
-        action[randint(0, 4)] = 1
-        return action
+        return randint(0, 4)
 
     def apply_action(self, action, random=False):
         """EDIT: actions are currently formatted as (5,) one-hot arrays representing the choice of move.
@@ -367,7 +387,7 @@ class Generals(Environment):
         obs = self.prev_observation
         next_obs = self.wait_for_next_observation()
         reward = self.reward_func(obs, action, next_obs, self)
-        done = np.count_nonzero(next_obs + 2) == 0
+        done = np.count_nonzero(next_obs['other'] - 9) == 0
 
         self.reward_history.append(reward)
         return next_obs, reward, done

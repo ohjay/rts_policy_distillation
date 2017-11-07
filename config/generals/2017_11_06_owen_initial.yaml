@@ -20,15 +20,21 @@ generals:
 
 dqn_arch:
   inputs:
-    image:
-      dtype: float32
-      shape: [2700]  # three maps
+    terrain:
+      dtype: uint8
+      shape: [30, 30, 1]
+    ownership:
+      dtype: uint8
+      shape: [30, 30, 1]
+    armies:
+      dtype: uint8
+      shape: [30, 30, 1]
     other:
       dtype: float32
       shape: [34]  # other game state
 
   layers:
-    - inputs: [image]
+    - inputs: [terrain, ownership, armies]
       type: conv2d
       size: 32
       kernel_size: 8
