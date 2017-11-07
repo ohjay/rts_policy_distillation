@@ -10,6 +10,7 @@ import json
 import time
 import threading
 import collections
+import warnings
 import numpy as np
 from random import randint, random
 from websocket import create_connection, WebSocketConnectionClosedException
@@ -87,11 +88,13 @@ class Generals(Environment):
         self.player_index = -1
         self.cities = []
         self.map = []
+        self.width, self.height = -1, -1
         self.terrain = None
         self.stars = []
         self.active = False
         self.move_id = 1
         self.prev_mode = None
+        self.active_sq = None
 
         # Learning-related info
         self.prev_observation = None
@@ -182,13 +185,15 @@ class Generals(Environment):
             return {'result': result}
 
         self.active = True
+        if self.active_sq is None:
+            self.active_sq = data['generals'][self.player_index]
 
         self.cities = self.patch(self.cities, data['cities_diff'])  # currently visible cities
         self.map = self.patch(self.map, data['map_diff'])  # current map state (dimensions, armies, terrain)
 
         generals = data['generals']
-        width, height = self.map[0], self.map[1]
-        size = width * height
+        self.width, self.height = self.map[0], self.map[1]
+        size = self.width * self.height
 
         # Extract army and terrain values
         armies = self.map[2:size+2]
@@ -203,8 +208,8 @@ class Generals(Environment):
         return {
             'result': result,
             'generals': generals,  # array of general positions ordered by index (-1 indicates "unknown")
-            'width': width,
-            'height': height,
+            'width': self.width,
+            'height': self.height,
             'size': size,
             'armies': armies,  # quantities of army units for each square
             'terrain': self.terrain,  # type of each square (-4, -3, -2, -1, or a player index indicating ownership)
@@ -293,65 +298,51 @@ class Generals(Environment):
             raise ValueError('no updates have been received')
         self.client.send(['attack', start_index, end_index, is_half, self.move_id])
         self.move_id += 1
+        self.active_sq = end_index
 
-    @staticmethod
-    def _parse_action(action):
+    def _parse_action(self, action):
         """Grabs (start_index, end_index) from ACTION."""
         # start_index, end_index = int(round(action[0])), int(round(action[1]))
-        start_index, end_index = int(action) // 1000, int(action) % 1000
-        return start_index, end_index
+        # start_index, end_index = int(action) // 1000, int(action) % 1000
+
+        end_index = None
+        if action[ACTION_UP]:
+            end_index = self.active_sq - self.width
+        elif action[ACTION_DOWN]:
+            end_index = self.active_sq + self.width
+        elif action[ACTION_LEFT]:
+            end_index = self.active_sq - 1
+        elif action[ACTION_RIGHT]:
+            end_index = self.active_sq + 1
+
+        return self.active_sq, end_index
 
     def _valid(self, action):
         """Returns True if the given action is currently valid."""
+        warnings.warn('deprecated', DeprecationWarning)
         start_index, end_index = self._parse_action(action)
         if self.terrain[start_index] != self.player_index:
             return False
-        width, height = self.map[0], self.map[1]
-        row = start_index // width
-        col = start_index % width
+        row = start_index // self.width
+        col = start_index % self.width
         if end_index == start_index - 1:
             return col > 0
         if end_index == start_index + 1:
-            return col < width - 1
-        if end_index == start_index + width:
-            return row < height - 1
-        if end_index == start_index - width:
+            return col < self.width - 1
+        if end_index == start_index + self.width:
+            return row < self.height - 1
+        if end_index == start_index - self.width:
             return row > 0
         return False
 
     def get_random_action(self):
         """Get a random move."""
-        width, height = self.map[0], self.map[1]
-        size = width * height
-
-        while True:
-            # Pick a random tile
-            start_index = randint(0, size - 1)
-
-            # If we own the tile, make a random move starting from it
-            if self.terrain[start_index] == self.player_index:
-                row = start_index // width
-                col = start_index % width
-                end_index = start_index
-
-                rand = random()
-                if rand < 0.25 and col > 0:
-                    end_index -= 1  # left
-                elif rand < 0.5 and col < width - 1:
-                    end_index += 1  # right
-                elif rand < 0.75 and row < height - 1:
-                    end_index += width  # down
-                elif row > 0:
-                    end_index -= width
-                else:
-                    continue
-
-                return start_index * 1000 + end_index
-                # return np.array([start_index, end_index])
+        action = np.zeros(5)
+        action[randint(0, 4)] = 1
+        return action
 
     def apply_action(self, action, random=False):
-        """EDIT: actions are currently (temporarily) formatted as 1000 * start_index + end_index.
-        TODO: change this.
+        """EDIT: actions are currently formatted as (5,) one-hot arrays representing the choice of move.
 
         Actions are formatted as (from, to) arrays of shape (2,).
         If the action is invalid, a random one will be selected.
@@ -364,12 +355,13 @@ class Generals(Environment):
 
         TODO: incorporate 50% moves
         """
-        if not self._valid(action):
-            print('invalid action, choosing one at random')
-            action = self.get_random_action()
+        # if not self._valid(action):
+        #     print('invalid action, choosing one at random')
+        #     action = self.get_random_action()
 
         start_index, end_index = self._parse_action(action)
-        self.attack(start_index, end_index)
+        if end_index is not None:
+            self.attack(start_index, end_index)
 
         # Generate return info
         obs = self.prev_observation
