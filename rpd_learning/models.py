@@ -8,7 +8,7 @@ Utilities for constructing a model.
 
 import os
 import tensorflow as tf
-from tensorflow.contrib.layers import fully_connected
+from tensorflow.contrib.layers import fully_connected, convolution2d
 
 class Model(object):
     def __init__(self, arch, inputs=None, scope=None, reuse=False):
@@ -58,7 +58,10 @@ class Model(object):
                     layer_output = [item for sublist in layer_output for item in sublist]  # flatten
                     outputs[i].extend(layer_output)
                 else:
-                    inputs = layer.get('inputs', outputs[i - 1])  # use output of previous layer as default
+                    if i > 0:
+                        inputs = layer.get('inputs', []) + outputs[i - 1]  # use output of previous layer as default
+                    else:
+                        inputs = layer['inputs']  # inputs required for first layer
                     for j in range(len(inputs)):
                         if type(inputs[j]) == str:
                             inputs[j] = self.inputs[inputs[j]]
@@ -70,10 +73,14 @@ class Model(object):
                     biases_initializer = tf.constant_initializer(layer.get('biases_init', 0.0))
 
                     layer_type = layer['type']
+                    inputs = tf.concat(inputs, axis=1)
                     if layer_type == 'fc':
-                        inputs = tf.concat(inputs, axis=1)
                         outputs[i].append(fully_connected(inputs, size, activation_fn=activation_fn,
                                                           biases_initializer=biases_initializer))
+                    elif layer_type == 'conv2d':
+                        outputs[i].append(convolution2d(inputs, size, kernel_size=layer['kernel_size'],
+                                                        stride=layer['stride'], activation_fn=activation_fn,
+                                                        biases_initializer=biases_initializer))
                     else:
                         raise NotImplementedError
         return outputs

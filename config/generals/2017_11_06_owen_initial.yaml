@@ -20,24 +20,37 @@ generals:
 
 dqn_arch:
   inputs:
-    observation:
+    image:
       dtype: float32
-      shape: [1884]
+      shape: [2700]  # three maps
+    other:
+      dtype: float32
+      shape: [34]  # other game state
 
   layers:
-    - inputs: [observation]
-      type: fc
-      size: 256
+    - inputs: [image]
+      type: conv2d
+      size: 32
+      kernel_size: 8
+      stride: 4
       activation: relu
-    - type: fc
-      size: 128
-      activation: relu
-    - type: fc
+    - type: conv2d
       size: 64
+      kernel_size: 4
+      stride: 2
+      activation: relu
+    - type: conv2d
+      size: 64
+      kernel_size: 3
+      stride: 1
+      activation: relu
+    - inputs: [other]  # will be this + output of CNN
+      type: fc
+      size: 512
       activation: relu
 
   outputs:
     action:
       dtype: float32
-      shape: []
+      shape: [5]  # five actions centered around active square
       activation: X
