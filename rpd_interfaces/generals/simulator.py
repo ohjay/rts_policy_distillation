@@ -21,15 +21,18 @@ _CITY_MAX_ARMY = 40
 
 
 def land_dt(player, state, next_state):
-    return np.sum(np.sum(next_state[1]), np.sum(state[1]))
+    if state is None:
+        return np.sum(next_state[1] == player.id_no)
+    return np.sum(next_state[1] == player.id_no) - np.sum(state[1] == player.id_no)
 
 class Player(object):
-    def __init__(self, id_no, reward_fn=land_dt):
+    def __init__(self, id_no, general_loc, reward_fn=land_dt):
         self.id_no = id_no
         self.actions = queue.Queue()
         self.outputs = queue.Queue()
         self.last_state = None
         self.reward_fn = reward_fn
+        self.general_loc = general_loc.tolist()
 
     def set_action(self, action):
         self.actions.put(action)
@@ -41,11 +44,9 @@ class Player(object):
         self.outputs.put(obs)
 
     def get_output(self):
-        last_state = self.last_state
         new_state = self.outputs.get()
-        reward = reward_fn(self.id_no, last_state, new_state)
         self.last_state = new_state
-        return last_state, new_state, reward
+        return new_state
 
 class Map(object):
     def __init__(self, size, player_count):
@@ -76,8 +77,8 @@ class Map(object):
             self.terrain[x,y] = _GENERAL
             self.owner[x,y] = i + 1
 
-        self.players = {i: Player(i) for i in range(1, player_count + 1)}
-
+        self.players = {i: Player(i, self.generals[i-1]) for i in range(1, player_count + 1)}
+        self.remaining_players = player_count
         """
         self.cities = np.zeros((player_count * 2, 2))
         self.generals = np.zeros((player_count, 2))
@@ -94,7 +95,8 @@ class Map(object):
         self._spawn()
         self.turn_count += 1
         self.print_state()
-        self._update()
+        if self.remaining_players > 1:
+            self._update()
 
     def _execute_action(self, player, start_location, end_location):
         s_x, s_y = start_location
@@ -108,11 +110,15 @@ class Map(object):
                 self.armies[e_x, e_y] += moving
             else:
                 self.armies[e_x, e_y] -= moving
-                if self.armies[e_x, e_y] < 0:
+                if self.armies[e_x, e_y] < 0: # If target square has value 0, does it go neutral?
+                    if self.terrain[e_x, e_y] == _GENERAL:
+                        defeated = self.owner[e_x, e_y]
+                        defeated_map = (self.owner == defeated)
+                        diff = defeated - player.id_no
+                        self.owner -= defeated_map * diff
+                        self.remaining_players -= 1
                     self.armies[e_x, e_y] *= -1
                     self.owner[e_x, e_y] = player.id_no
-                if self.armies[e_x, e_y] == 0:
-                    self.owner[e_x, e_y] = _NEUTRAL
         else:
             print("Invalid action {} {}".format(start_location, end_location))
 
@@ -124,7 +130,10 @@ class Map(object):
         visible_terrain = self.terrain * seen + fog * _FOG + self.terrain * (self.terrain != _GENERAL) * fog
         visible_armies = self.armies * seen
         visible_owner = self.owner * seen
-        player.set_output((visible_terrain, visible_armies, visible_owner))
+        new_state = (visible_terrain, visible_armies, visible_owner,)
+        reward = player.reward_fn(player, player.last_state, new_state)
+        done = self.owner[player.general_loc] == player.id_no
+        player.set_output((new_state, reward, done))
 
     def _spawn(self):
         for x,y in self.cities:
@@ -140,6 +149,9 @@ class Map(object):
     def action(self, player_id, start_location, end_location): # is_half, player_id
         if player_id in self.players:
             self.players[player_id].set_action((start_location, end_location))
+            return self.players[player_id].get_output()
+        print("Invalid player %d", player_id)
+        raise
 
     def __str__(self):
         return "{} \n {} \n {} \n".format(self.terrain, self.armies, self.owner)
@@ -148,17 +160,3 @@ class Map(object):
         print(self.terrain)
         print(self.owner)
         print(self.armies)
-
-x = Map((10, 10), 2)
-
-x._spawn()
-x._spawn()
-p1gen = x.generals[0]
-p1target = np.copy(p1gen)
-p1target[0] += 1
-p2gen = x.generals[1]
-p2target = np.copy(p2gen)
-p2target[0] += 1
-x.action(1, p1gen, p1target)
-x.action(2, p2gen, p2target)
-x._update()
