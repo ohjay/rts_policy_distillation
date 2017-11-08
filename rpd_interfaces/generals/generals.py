@@ -11,7 +11,7 @@ import time
 import threading
 import collections
 import numpy as np
-from random import randint, random
+from random import randint
 from websocket import create_connection, WebSocketConnectionClosedException
 from rpd_interfaces.interfaces import Environment
 from rpd_interfaces.generals.reward import rew_total_land_dt
@@ -22,13 +22,29 @@ TILE_EMPTY = -1
 TILE_MOUNTAIN = -2
 TILE_FOG = -3
 TILE_FOG_OBSTACLE = -4  # cities and mountains show up as obstacles in the fog of war
+TILE_CITY = -5
+
+# Action constants
+# ----------------
+ACTION_UP = 0
+ACTION_DOWN = 1
+ACTION_LEFT = 2
+ACTION_RIGHT = 3
+ACTION_NOOP = 4
 
 # General constants
 # -----------------
 SERVER_ENDPOINT = 'ws://botws.generals.io/socket.io/?EIO=3&transport=websocket'
 REPLAY_URL_BASE = 'http://bot.generals.io/replays/'
-_INVALID = 2
+_INVALID = 9
 MODE_DEFAULT = '1v1'
+
+_INVALID_OBS = {
+    'terrain': np.full((30, 30, 1), _INVALID, np.uint8),
+    'ownership': np.full((30, 30, 1), _INVALID, np.uint8),
+    'armies': np.full((30, 30, 1), _INVALID, np.uint8),
+    'other': np.full(34, _INVALID, np.uint8),
+}
 
 class Client(object):
     def __init__(self, endpoint):
@@ -76,13 +92,19 @@ class Generals(Environment):
         # Game data
         self.meta = {}  # playerIndex, replay_id, chat_room, team_chat_room, usernames, teams
         self.player_index = -1
+        self.general_sq = -1
         self.cities = []
         self.map = []
+        self.width, self.height = -1, -1
+        self.armies = None
         self.terrain = None
         self.stars = []
         self.active = False
         self.move_id = 1
         self.prev_mode = None
+        self.active_sq = None
+        self.turn = -1
+        self.turn_throttle = -1
 
         # Learning-related info
         self.prev_observation = None
@@ -117,6 +139,8 @@ class Generals(Environment):
         self.client.send(['set_force_start', game_id, True])
 
         self.prev_mode = mode
+        self.active = False
+        self.active_sq = None
         print('waiting to join a %s game' % mode)
 
     def leave_game(self):
@@ -162,7 +186,7 @@ class Generals(Environment):
                 # Contents: turn, map_diff, cities_diff, generals, scores, stars
                 yield self.process_update(msg[1])
             elif msg[0] in {'game_won', 'game_lost'}:
-                yield self.process_update(msg[0], result=msg[1])
+                yield self.process_update(msg[1], result=msg[0])
                 break
             else:
                 print('unknown message type: {}'.format(msg))
@@ -173,19 +197,23 @@ class Generals(Environment):
             return {'result': result}
 
         self.active = True
+        if self.active_sq is None:
+            self.general_sq = data['generals'][self.player_index]
+            self.active_sq = self.general_sq
+            print('[i] general square: %d' % self.general_sq)
 
         self.cities = self.patch(self.cities, data['cities_diff'])  # currently visible cities
         self.map = self.patch(self.map, data['map_diff'])  # current map state (dimensions, armies, terrain)
 
         generals = data['generals']
-        width, height = self.map[0], self.map[1]
-        size = width * height
+        self.width, self.height = self.map[0], self.map[1]
+        size = self.width * self.height
 
         # Extract army and terrain values
-        armies = self.map[2:size+2]
+        self.armies = self.map[2:size+2]
         self.terrain = self.map[size+2:size+2+size]
 
-        turn = data['turn']
+        self.turn = data['turn']
         scores = data['scores']
 
         if 'stars' in data:
@@ -194,12 +222,12 @@ class Generals(Environment):
         return {
             'result': result,
             'generals': generals,  # array of general positions ordered by index (-1 indicates "unknown")
-            'width': width,
-            'height': height,
+            'width': self.width,
+            'height': self.height,
             'size': size,
-            'armies': armies,  # quantities of army units for each square
+            'armies': self.armies,  # quantities of army units for each square
             'terrain': self.terrain,  # type of each square (-4, -3, -2, -1, or a player index indicating ownership)
-            'turn': turn,
+            'turn': self.turn,
             'scores': scores,  # list of dictionaries containing score information for each player
             'cities': self.cities,
         }
@@ -208,7 +236,7 @@ class Generals(Environment):
         for update in self.get_updates():
             if type(update) == dict and update['result'] is None:
                 return self.extract_observation(update)
-        return np.full(1884, -2, np.int32)  # done
+        return _INVALID_OBS  # done
 
     @staticmethod
     def patch(old, diff):
@@ -230,109 +258,110 @@ class Generals(Environment):
         lst.extend([val] * (size - len(lst)))
         return lst
 
+    @staticmethod
+    def _pad2d(arr, val, des_shape):
+        """Pad a 2D array with VAL s.t. its final dimensions are (DES_SHAPE[0], DES_SHAPE[1])."""
+        final = np.full(des_shape, val)
+        final[:arr.shape[0], :arr.shape[1]] = arr
+        return final
+
     def extract_observation(self, update):
         """Returns an observation as a tensor.
 
-        For generals.io, an observation is a (1884,) NumPy array
-        with the following contents at the following indices:
-
-        - index 0: width of the map
-        - index 1: turn number
-        - indices 2-9: general positions (-1 indicates "unknown")
-        - indices 10-33: (# tiles, # units, 0 if dead else 1) for each of eight potential players, ordered by index
-        - indices 34-83: ordered list of city indices
-        - indices 84-983: terrain info for each square, encoded as an integer from -4 to 7
-        - indices 984-1883: quantities of army units for each square index
+        For generals.io, an observation is a dictionary of NumPy arrays, structured as follows:
+        - 'terrain' [shape (30, 30, 1)]: the terrain map
+        - 'ownership' [shape (30, 30, 1)]: the ownership map
+        - 'armies' [shape (30, 30, 1)]: the army map
+        - 'other' [shape 34]:
+          - index 0: width of the map
+          - index 1: turn number
+          - indices 2-9: general positions (-1 indicates "unknown")
+          - indices 10-33: (# tiles, # units, 0 if dead else 1) for each of eight potential players, ordered by index
 
         Whenever applicable, -2 indicates "nonexistent / invalid".
         Maximum capacity is eight players and a 30x30 map.
         """
         if update['result'] is not None:
             # TODO this needs to represent a high-reward observation if we win, and vice-versa if we lose
-            return np.full(1884, -2, np.int32)
+            return _INVALID_OBS
 
         _scores = []
         for s in update['scores']:
             _scores.extend([s['tiles'], s['total'], 1 - int(s['dead'])])
-        observation = np.array(
-            [update['width']] +
-            [update['turn']] +
-            self._pad(update['generals'], _INVALID, 8) +
-            self._pad(_scores, _INVALID, 24) +
-            self._pad(update['cities'], _INVALID, 30) +
-            self._pad(update['terrain'], _INVALID, 900) +
-            self._pad(update['armies'], _INVALID, 900)
-        ).astype(np.int32)  # the only things outside of byte range are scores
+
+        terrain = update['terrain']
+        ownership = np.reshape([max(-1, id) for id in update['terrain']], (self.height, self.width))
+        for city_index in update['cities']:
+            terrain[city_index] = TILE_CITY
+        terrain = np.reshape(terrain, (self.height, self.width))
+        armies = np.reshape(update['armies'], (self.height, self.width))
+
+        observation = {
+            'terrain': self._pad2d(terrain, _INVALID, (30, 30))[:, :, None],
+            'ownership': self._pad2d(ownership, _INVALID, (30, 30))[:, :, None],
+            'armies': self._pad2d(armies, _INVALID, (30, 30))[:, :, None],
+            'other': np.array(
+                [update['width']] +
+                [update['turn']] +
+                self._pad(update['generals'], _INVALID, 8) +
+                self._pad(_scores, _INVALID, 24)
+            ).astype(np.float32),
+        }
         self.prev_observation = observation
         return observation
 
     def attack(self, start_index, end_index, is_half=False):
         if not self.active:
             raise ValueError('no updates have been received')
-        self.client.send(['attack', start_index, end_index, is_half, self.move_id])
-        self.move_id += 1
+        if self.turn > self.turn_throttle:
+            self.active_sq = end_index
+            if self._valid(start_index, end_index):
+                self.client.send(['attack', start_index, end_index, is_half, self.move_id])
+                self.move_id += 1
+            self.turn_throttle = self.turn
 
-    @staticmethod
-    def _parse_action(action):
-        """Grabs (start_index, end_index) from ACTION."""
+    def _parse_action(self, action):
+        """Obtains the (start_index, end_index) encoded by ACTION."""
         # start_index, end_index = int(round(action[0])), int(round(action[1]))
-        start_index, end_index = int(action) // 1000, int(action) % 1000
-        return start_index, end_index
+        # start_index, end_index = int(action) // 1000, int(action) % 1000
 
-    def _valid(self, action):
+        end_index = None
+        if action == ACTION_UP:
+            end_index = self.active_sq - self.width
+        elif action == ACTION_DOWN:
+            end_index = self.active_sq + self.width
+        elif action == ACTION_LEFT:
+            end_index = self.active_sq - 1
+        elif action == ACTION_RIGHT:
+            end_index = self.active_sq + 1
+
+        return self.active_sq, end_index
+
+    def _valid(self, start_index, end_index):
         """Returns True if the given action is currently valid."""
-        start_index, end_index = self._parse_action(action)
-        if self.terrain[start_index] != self.player_index:
+        if self.terrain[start_index] != self.player_index or self.armies[start_index] < 2:
             return False
-        width, height = self.map[0], self.map[1]
-        row = start_index // width
-        col = start_index % width
+        if self.terrain[end_index] in (TILE_MOUNTAIN, TILE_FOG_OBSTACLE):
+            return False
+        row = start_index // self.width
+        col = start_index % self.width
         if end_index == start_index - 1:
             return col > 0
         if end_index == start_index + 1:
-            return col < width - 1
-        if end_index == start_index + width:
-            return row < height - 1
-        if end_index == start_index - width:
+            return col < self.width - 1
+        if end_index == start_index + self.width:
+            return row < self.height - 1
+        if end_index == start_index - self.width:
             return row > 0
         return False
 
     def get_random_action(self):
         """Get a random move."""
-        width, height = self.map[0], self.map[1]
-        size = width * height
-
-        while True:
-            # Pick a random tile
-            start_index = randint(0, size - 1)
-
-            # If we own the tile, make a random move starting from it
-            if self.terrain[start_index] == self.player_index:
-                row = start_index // width
-                col = start_index % width
-                end_index = start_index
-
-                rand = random()
-                if rand < 0.25 and col > 0:
-                    end_index -= 1  # left
-                elif rand < 0.5 and col < width - 1:
-                    end_index += 1  # right
-                elif rand < 0.75 and row < height - 1:
-                    end_index += width  # down
-                elif row > 0:
-                    end_index -= width
-                else:
-                    continue
-
-                return start_index * 1000 + end_index
-                # return np.array([start_index, end_index])
+        return randint(0, 4)
 
     def apply_action(self, action, random=False):
-        """EDIT: actions are currently (temporarily) formatted as 1000 * start_index + end_index.
-        TODO: change this.
-
-        Actions are formatted as (from, to) arrays of shape (2,).
-        If the action is invalid, a random one will be selected.
+        """Actions are formatted as integers from 0-4 representing the choice of move (up, down, left, right, noop).
+        If the action is invalid, nothing will be done.
 
         Returns an (observation, reward, done) tuple.
 
@@ -342,18 +371,19 @@ class Generals(Environment):
 
         TODO: incorporate 50% moves
         """
-        if not self._valid(action):
-            print('invalid action, choosing one at random')
-            action = self.get_random_action()
+        # if not self._valid(action):
+        #     print('invalid action, choosing one at random')
+        #     action = self.get_random_action()
 
         start_index, end_index = self._parse_action(action)
-        self.attack(start_index, end_index)
+        if end_index is not None:
+            self.attack(start_index, end_index)
 
         # Generate return info
         obs = self.prev_observation
         next_obs = self.wait_for_next_observation()
         reward = self.reward_func(obs, action, next_obs, self)
-        done = np.count_nonzero(next_obs + 2) == 0
+        done = np.count_nonzero(next_obs['other'] - _INVALID) == 0
 
         self.reward_history.append(reward)
         return next_obs, reward, done

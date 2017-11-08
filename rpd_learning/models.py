@@ -8,7 +8,7 @@ Utilities for constructing a model.
 
 import os
 import tensorflow as tf
-from tensorflow.contrib.layers import fully_connected
+from tensorflow.contrib.layers import fully_connected, convolution2d, flatten
 
 class Model(object):
     def __init__(self, arch, inputs=None, scope=None, reuse=False):
@@ -58,11 +58,14 @@ class Model(object):
                     layer_output = [item for sublist in layer_output for item in sublist]  # flatten
                     outputs[i].extend(layer_output)
                 else:
-                    inputs = layer.get('inputs', outputs[i - 1])  # use output of previous layer as default
+                    if i > 0:
+                        inputs = layer.get('inputs', []) + outputs[i - 1]  # use output of previous layer as default
+                    else:
+                        inputs = layer['inputs']  # inputs required for first layer
                     for j in range(len(inputs)):
                         if type(inputs[j]) == str:
                             inputs[j] = self.inputs[inputs[j]]
-                    size = layer['size']
+                    num_outputs = layer['num_outputs']
                     try:
                         activation_fn = getattr(tf.nn, layer['activation'])
                     except AttributeError:
@@ -70,10 +73,17 @@ class Model(object):
                     biases_initializer = tf.constant_initializer(layer.get('biases_init', 0.0))
 
                     layer_type = layer['type']
+                    inputs = tf.concat(inputs, axis=1)
                     if layer_type == 'fc':
-                        inputs = tf.concat(inputs, axis=1)
-                        outputs[i].append(fully_connected(inputs, size, activation_fn=activation_fn,
+                        outputs[i].append(fully_connected(inputs, num_outputs, activation_fn=activation_fn,
                                                           biases_initializer=biases_initializer))
+                    elif layer_type == 'conv2d':
+                        outputs[i].append(convolution2d(inputs, num_outputs, kernel_size=layer['kernel_size'],
+                                                        stride=layer['stride'], activation_fn=activation_fn,
+                                                        biases_initializer=biases_initializer))
+                        if i < len(layers) and layers[i + 1]['type'] == 'fc':
+                            # If the next layer is a fully connected layer, we need to flatten this output
+                            outputs[i][-1] = flatten(outputs[i][-1])
                     else:
                         raise NotImplementedError
         return outputs
@@ -81,13 +91,13 @@ class Model(object):
     def load_output(self, output_name, output_info, inputs):
         shape = output_info['shape']
         assert len(shape) == 0 or len(shape) == 1
-        size = shape[0] if shape else 1
+        num_outputs = shape[0] if shape else 1
         try:
             activation_fn = getattr(tf.nn, output_info.get('activation', 'relu'))
         except AttributeError:
             activation_fn = None
         biases_initializer = tf.constant_initializer(output_info.get('biases_init', 0.0))
-        outputs = fully_connected(inputs, size, activation_fn=activation_fn, biases_initializer=biases_initializer)
+        outputs = fully_connected(inputs, num_outputs, activation_fn=activation_fn, biases_initializer=biases_initializer)
 
         # Loss
         loss = output_info.get('loss', None)
