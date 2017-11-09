@@ -38,24 +38,30 @@ class Player(object):
         self.actions.put(action)
 
     def get_action(self):
-        return self.actions.get()
+        return self.actions.get(block=False)  # previously blocking
 
     def set_output(self, obs):
         self.outputs.put(obs)
 
     def get_output(self):
+        """
+        TODO: do we want to set `self.last_state` here? All this blocking stuff is confusing me.
+        Are we trying to require that players make moves each half-turn? and/or parallelism?
+        If not, a player could make a ton of actions and mess up the output queue...?
+        But if we are, there's like a mutual blocking thing going on with these two queues right now...?
+        """
         new_state = self.outputs.get()
         self.last_state = new_state
         return new_state
 
 class Map(object):
-    def __init__(self, size, player_count):
-        self.width = size[0]
-        self.height = size[1]
+    def __init__(self, shape, player_count):
+        self.width = shape[0]
+        self.height = shape[1]
 
-        self.terrain = np.zeros(size)
-        self.armies = np.zeros(size)
-        self.owner = np.zeros(size)
+        self.terrain = np.zeros(shape)
+        self.armies = np.zeros(shape)
+        self.owner = np.zeros(shape)
         self.turn_count = 1
         self.grid = np.vstack(np.mgrid[:self.width, :self.height].T)
 
@@ -65,17 +71,17 @@ class Map(object):
         self.cities = np.hstack((np.random.randint(self.width, size = (2 * player_count, 1)), \
                                 np.random.randint(self.height, size = (2 * player_count, 1))))
 
-        for x,y in self.cities:
-            self.terrain[x,y] = _CITY
-            self.armies[x,y] = _CITY_MAX_ARMY
+        for x, y in self.cities:
+            self.terrain[x, y] = _CITY
+            self.armies[x, y] = _CITY_MAX_ARMY
 
         self.generals = np.hstack((np.random.randint(self.width, size = (player_count, 1)), \
                                 np.random.randint(self.height, size = (player_count, 1))))
 
         for i, loc in enumerate(self.generals):
             x, y = loc
-            self.terrain[x,y] = _GENERAL
-            self.owner[x,y] = i + 1
+            self.terrain[x, y] = _GENERAL
+            self.owner[x, y] = i + 1
 
         self.players = {i: Player(i, self.generals[i-1]) for i in range(1, player_count + 1)}
         self.remaining_players = player_count
@@ -86,7 +92,15 @@ class Map(object):
             self.cities[2*i] = np.array([np.random.randint(self.width), np.random.randint(self.height)])
         """
 
-    def _update(self):
+    def _run_turn(self, verbose=False):
+        """Simulate a single turn of the game. Technically this is a single "half-turn" of the game.
+
+        A turn consists of the following actions:
+        -----------------------------------------
+          - execute the next action in each player's queue
+          - generate observations for each player
+          - spawn units on owned squares, if applicable
+        """
         for player in self.players.values():
             start_location, end_location = player.get_action()
             self._execute_action(player, start_location, end_location)
@@ -94,16 +108,22 @@ class Map(object):
             self._generate_obs(player)
         self._spawn()
         self.turn_count += 1
-        self.print_state()
+        if verbose:
+            self.print_state()
+
+    def _update(self):
+        """Game loop."""
+        self._run_turn()
         if self.remaining_players > 1:
-            self._update()
+            self._run_turn()
 
     def _execute_action(self, player, start_location, end_location):
+        """Update maps to account for player PLAYER making an action from START_LOCATION to END_LOCATION."""
         s_x, s_y = start_location
         e_x, e_y = end_location
         if self.owner[s_x, s_y] == player.id_no \
-            and self.armies[s_x, s_y] > 1 \
-            and np.abs(s_x - e_x) + np.abs(s_y - e_y) == 1: 
+                and self.armies[s_x, s_y] > 1 \
+                and np.abs(s_x - e_x) + np.abs(s_y - e_y) == 1:
             moving = self.armies[s_x, s_y] - 1
             self.armies[s_x, s_y] = 1
             if self.owner[e_x, e_y] == player.id_no:
@@ -123,6 +143,9 @@ class Map(object):
             print("Invalid action {} {}".format(start_location, end_location))
 
     def _generate_obs(self, player):
+        """Generates an observation, as a (state, reward, done) tuple, for the given player.
+        This observation will be saved in the player's internal queue.
+        """
         player_owned = np.transpose((self.owner == player.id_no).nonzero())
         distances = np.min(cdist(self.grid, player_owned, 'cityblock'), axis=1).reshape(self.height, self.width).T
         seen = distances <= 1
@@ -136,17 +159,25 @@ class Map(object):
         player.set_output((new_state, reward, done))
 
     def _spawn(self):
-        for x,y in self.cities:
-            if self.owner[x,y] != _NEUTRAL or self.armies[x,y] < _CITY_MAX_ARMY:
-                self.armies[x,y] += 1
-        for x,y in self.generals:
-            self.armies[x,y] += 1
+        """Spawn units wherever units should be spawned."""
+        if self.turn_count % 2 == 0:  # units will not be spawned on half-turns
+            for x, y in self.cities:
+                if self.owner[x, y] != _NEUTRAL or self.armies[x, y] < _CITY_MAX_ARMY:
+                    self.armies[x, y] += 1
+            for x, y in self.generals:
+                self.armies[x, y] += 1
 
-        if self.turn_count % 25 == 0:
-            player_owned = (self.owner > 0)
-            self.armies += player_owned
+            if self.turn_count % 50 == 0:
+                player_owned = (self.owner > 0)
+                self.armies += player_owned
 
     def action(self, player_id, start_location, end_location): # is_half, player_id
+        """Have the player with PLAYER_ID input an action from START_LOCATION to END_LOCATION.
+        The action will not actually be executed at this time;
+        rather, it will be added to a queue of actions to be taken in the future.
+
+        START_LOCATION and END_LOCATION are currently formatted as shape (2,) points.
+        """
         if player_id in self.players:
             self.players[player_id].set_action((start_location, end_location))
             return self.players[player_id].get_output()

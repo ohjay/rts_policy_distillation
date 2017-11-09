@@ -1,18 +1,16 @@
 #!/usr/bin/env python
 
 """
-generals.py
+generals_sim.py
 
-Interface for generals.io. Borrows from https://github.com/toshima/generalsio.
+Interface for the simulated version of generals.io.
+This version is local and doesn't require any networking.
 """
 
-import json
-import time
-import threading
 import collections
 import numpy as np
 from random import randint
-from websocket import create_connection, WebSocketConnectionClosedException
+import rpd_interfaces.generals.simulator as sim
 from rpd_interfaces.interfaces import Environment
 from rpd_interfaces.generals.reward import rew_total_land_dt
 
@@ -34,10 +32,7 @@ ACTION_NOOP = 4
 
 # General constants
 # -----------------
-SERVER_ENDPOINT = 'ws://botws.generals.io/socket.io/?EIO=3&transport=websocket'
-REPLAY_URL_BASE = 'http://bot.generals.io/replays/'
 _INVALID = 9
-MODE_DEFAULT = '1v1'
 
 _INVALID_OBS = {
     'terrain': np.full((30, 30, 1), _INVALID, np.uint8),
@@ -46,51 +41,15 @@ _INVALID_OBS = {
     'other': np.full(34, _INVALID, np.uint8),
 }
 
-class Client(object):
-    def __init__(self, endpoint):
-        self._ws = create_connection(endpoint)
-        self._lock = threading.RLock()
+# TODO: this entire file is in progress
 
-        # Start sending heartbeat
-        t = threading.Thread(target=self.begin_heartbeat)
-        t.daemon = True
-        t.start()
-
-    def begin_heartbeat(self):
-        while True:
-            try:
-                with self._lock:
-                    self._ws.send('2')
-            except WebSocketConnectionClosedException:
-                break
-            time.sleep(10)
-
-    def send(self, msg):
-        """Send a message over the socket."""
-        try:
-            with self._lock:
-                self._ws.send('42' + json.dumps(msg))
-        except WebSocketConnectionClosedException:
-            pass
-
-    def receive(self):
-        """Receive messages from the socket."""
-        try:
-            return self._ws.recv()
-        except WebSocketConnectionClosedException:
-            return None
-
-    def close(self):
-        """Close the socket."""
-        self._ws.close()
-
-class Generals(Environment):
-    def __init__(self, user_id, reward_func=rew_total_land_dt, reward_history_cap=1000):
-        self.client = Client(SERVER_ENDPOINT)
-        self.user_id = user_id
-
+class GeneralsSim(Environment):
+    def __init__(self, map_shape, map_player_count, reward_func=rew_total_land_dt, reward_history_cap=1000):
         # Game data
-        self.meta = {}  # playerIndex, replay_id, chat_room, team_chat_room, usernames, teams
+        self.height, self.width = map_shape
+        self.player_count = map_player_count
+        self.map = None
+
         self.player_index = -1
         self.general_sq = -1
         self.cities = []
@@ -113,84 +72,12 @@ class Generals(Environment):
 
     def close(self):
         """Close and clean up the environment."""
-        self.client.close()
+        self.map = None
 
-    def set_username(self, username):
-        """Remember: this should only be set once."""
-        self.client.send(['set_username', self.user_id, username])
-
-    def join_game(self, mode, game_id=None):
-        if mode == 'private':
-            if game_id is None:
-                raise ValueError('game id must be provided for private games')
-            self.client.send(['join_private', game_id, self.user_id])
-        elif mode == '1v1':
-            self.client.send(['join_1v1', self.user_id])
-        elif mode == 'team':
-            if game_id is None:
-                raise ValueError('game id must be provided for team games')
-            self.client.send(['join_team', game_id, self.user_id])
-        elif mode == 'ffa':
-            self.client.send(['play', self.user_id])
-        else:
-            raise ValueError('invalid mode')
-
-        # Always force start
-        self.client.send(['set_force_start', game_id, True])
-
-        self.prev_mode = mode
-        self.active = False
-        self.active_sq = None
-        print('waiting to join a %s game' % mode)
-
-    def leave_game(self):
-        """For rage quits and such."""
-        self.client.send(['leave_game'])
-
-    def reset(self, mode=None):
-        """Reset game. This just means starting a new one."""
-        if mode is None:
-            mode = self.prev_mode or MODE_DEFAULT
-        self.join_game(mode)
-
-        # Wait until we have our first observation, then return it
-        return self.wait_for_next_observation()
-
-    def get_updates(self):
-        """Generator method for getting real-time game updates."""
-        while True:
-            msg = self.client.receive()
-            if msg is None or not msg.strip():
-                break
-            if msg in {'3', '40'}:  # heartbeats, connection ACKs
-                continue
-
-            # Remove numeric prefix
-            while msg and msg[0].isdigit():
-                msg = msg[1:]
-
-            # Load message
-            msg = json.loads(msg)
-            if not isinstance(msg, list):
-                continue
-
-            if msg[0] == 'error_user_id':
-                raise ValueError('already in game')
-            elif msg[0] == 'pre_game_start':
-                print('game is about to start')
-            elif msg[0] == 'game_start':
-                self.meta = msg[1]
-                self.player_index = self.meta['playerIndex']
-                replay_url = REPLAY_URL_BASE + self.meta['replay_id']
-                print('Game starting! The replay will be available after the game at %s' % replay_url)
-            elif msg[0] == 'game_update':
-                # Contents: turn, map_diff, cities_diff, generals, scores, stars
-                yield self.process_update(msg[1])
-            elif msg[0] in {'game_won', 'game_lost'}:
-                yield self.process_update(msg[1], result=msg[0])
-                break
-            else:
-                print('unknown message type: {}'.format(msg))
+    def reset(self):
+        """Reset game and return the first observation."""
+        self.map = sim.Map((self.height, self.width), self.player_count)
+        return 'AN OBSERVATION'  # TODO
 
     def process_update(self, data, result=None):
         """Process and return a game update."""
@@ -202,9 +89,6 @@ class Generals(Environment):
             self.general_sq = data['generals'][self.player_index]
             self.active_sq = self.general_sq
             print('[i] general square: %d' % self.general_sq)
-
-        self.cities = self.patch(self.cities, data['cities_diff'])  # currently visible cities
-        self.map = self.patch(self.map, data['map_diff'])  # current map state (dimensions, armies, terrain)
 
         generals = data['generals']
         self.width, self.height = self.map[0], self.map[1]
@@ -240,26 +124,6 @@ class Generals(Environment):
         return _INVALID_OBS  # done
 
     @staticmethod
-    def patch(old, diff):
-        out, i = [], 0
-        while i < len(diff):
-            out.extend(old[len(out):len(out)+diff[i]])
-            i += 1
-            if i < len(diff):
-                out.extend(diff[i+1:i+1+diff[i]])
-                i += diff[i]
-            i += 1
-        return out
-
-    @staticmethod
-    def _pad(lst, val, size):
-        """Destructively right-pad a list with VAL until its length is equal to SIZE.
-        Return said list.
-        """
-        lst.extend([val] * (size - len(lst)))
-        return lst
-
-    @staticmethod
     def _pad2d(arr, val, des_shape):
         """Pad a 2D array with VAL s.t. its final dimensions are (DES_SHAPE[0], DES_SHAPE[1])."""
         final = np.full(des_shape, val)
@@ -267,7 +131,7 @@ class Generals(Environment):
         return final
 
     def extract_observation(self, update):
-        """Returns an observation as a tensor. (Parses an {input_name: value} observation from an update.)
+        """Returns an observation as a tensor.
 
         For generals.io, an observation is a dictionary of NumPy arrays, structured as follows:
         - 'terrain' [shape (30, 30, 1)]: the terrain map
