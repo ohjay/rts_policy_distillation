@@ -8,7 +8,7 @@ import tensorflow as tf
 from rpd_learning.dqn_utils import PiecewiseSchedule
 from rpd_learning import dqn
 
-SUPPORTED_ENVS = {'generals',}
+SUPPORTED_ENVS = {'generals', 'generals_sim',}
 SUPPORTED_OPS = {'train',}
 
 def get_available_gpus():
@@ -48,7 +48,9 @@ def train(env, config):
     dqn.learn(env, config, optimizer_spec=optimizer, session=session, exploration=exploration_schedule,
               stopping_criterion=stopping_criterion, replay_buffer_size=1000000, batch_size=32, gamma=0.99,
               learning_starts=50000, learning_freq=4, frame_history_len=1, target_update_freq=10000, grad_norm_clipping=10)
-    env.close()
+
+    if hasattr(env, 'close'):  # cleanup, if applicable
+        env.close()
 
 def test(env, config):
     for update in env.get_updates():
@@ -65,6 +67,11 @@ def run(config):
         from rpd_interfaces.generals import generals
         user_id = env_info['user_id']
         env = generals.Generals(user_id)
+    elif config['env'] == 'generals_sim':
+        from rpd_interfaces.generals import generals_sim
+        map_shape = (env_info['map_height'], env_info['map_width'])
+        map_player_count = env_info['map_player_count']
+        env = generals_sim.GeneralsSim(map_shape, map_player_count)
 
     eval(config['operation'])(env, config)
 

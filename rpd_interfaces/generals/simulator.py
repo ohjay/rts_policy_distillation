@@ -119,6 +119,8 @@ class Map(object):
 
     def _execute_action(self, player, start_location, end_location):
         """Update maps to account for player PLAYER making an action from START_LOCATION to END_LOCATION."""
+        if end_location is None:
+            return
         s_x, s_y = start_location
         e_x, e_y = end_location
         if self.owner[s_x, s_y] == player.id_no \
@@ -146,14 +148,7 @@ class Map(object):
         """Generates an observation, as a (state, reward, done) tuple, for the given player.
         This observation will be saved in the player's internal queue.
         """
-        player_owned = np.transpose((self.owner == player.id_no).nonzero())
-        distances = np.min(cdist(self.grid, player_owned, 'cityblock'), axis=1).reshape(self.height, self.width).T
-        seen = distances <= 1
-        fog = 1 - seen
-        visible_terrain = self.terrain * seen + fog * _FOG + self.terrain * (self.terrain != _GENERAL) * fog
-        visible_armies = self.armies * seen
-        visible_owner = self.owner * seen
-        new_state = (visible_terrain, visible_armies, visible_owner,)
+        new_state = self.generate_state(player)
         reward = player.reward_fn(player, player.last_state, new_state)
         done = self.owner[player.general_loc] == player.id_no
         player.set_output((new_state, reward, done))
@@ -170,6 +165,17 @@ class Map(object):
             if self.turn_count % 50 == 0:
                 player_owned = (self.owner > 0)
                 self.armies += player_owned
+
+    def generate_state(self, player):
+        """Generate state for PLAYER as a (terrain, armies, ownership) tuple."""
+        player_owned = np.transpose((self.owner == player.id_no).nonzero())
+        distances = np.min(cdist(self.grid, player_owned, 'cityblock'), axis=1).reshape(self.height, self.width).T
+        seen = distances <= 1
+        fog = 1 - seen
+        visible_terrain = self.terrain * seen + fog * _FOG + self.terrain * (self.terrain != _GENERAL) * fog
+        visible_armies = self.armies * seen
+        visible_owner = self.owner * seen
+        return visible_terrain, visible_armies, visible_owner
 
     def action(self, player_id, start_location, end_location): # is_half, player_id
         """Have the player with PLAYER_ID input an action from START_LOCATION to END_LOCATION.

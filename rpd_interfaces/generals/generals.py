@@ -279,7 +279,7 @@ class Generals(Environment):
           - indices 2-9: general positions (-1 indicates "unknown")
           - indices 10-33: (# tiles, # units, 0 if dead else 1) for each of eight potential players, ordered by index
 
-        Whenever applicable, -2 indicates "nonexistent / invalid".
+        Whenever applicable, _INVALID indicates "nonexistent / invalid".
         Maximum capacity is eight players and a 30x30 map.
         """
         if update['result'] is not None:
@@ -365,10 +365,6 @@ class Generals(Environment):
         If the action is invalid, nothing will be done.
 
         Returns an (observation, reward, done) tuple.
-
-        TODO: potential representations
-        (1) (int, int) from/to tuple (when applying, can round to nearest)
-        (2) (900 + 900,) array of 0s and 1s (when applying, can use argmax for each of from/to ranges
 
         TODO: incorporate 50% moves
         """
