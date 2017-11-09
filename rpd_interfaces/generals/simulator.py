@@ -68,15 +68,15 @@ class Map(object):
         for _ in range(self.width * self.height // 3):
             self.terrain[np.random.randint(self.width), np.random.randint(self.height)] = _MOUNTAIN
 
-        self.cities = np.hstack((np.random.randint(self.width, size = (2 * player_count, 1)), \
-                                np.random.randint(self.height, size = (2 * player_count, 1))))
+        self.cities = np.hstack((np.random.randint(self.width, size = (2 * player_count, 1)),
+                                 np.random.randint(self.height, size = (2 * player_count, 1))))
 
         for x, y in self.cities:
             self.terrain[x, y] = _CITY
             self.armies[x, y] = _CITY_MAX_ARMY
 
-        self.generals = np.hstack((np.random.randint(self.width, size = (player_count, 1)), \
-                                np.random.randint(self.height, size = (player_count, 1))))
+        self.generals = np.hstack((np.random.randint(self.width, size = (player_count, 1)),
+                                   np.random.randint(self.height, size = (player_count, 1))))
 
         for i, loc in enumerate(self.generals):
             x, y = loc
@@ -102,8 +102,8 @@ class Map(object):
           - spawn units on owned squares, if applicable
         """
         for player in self.players.values():
-            start_location, end_location = player.get_action()
-            self._execute_action(player, start_location, end_location)
+            start_location, end_location, is_half = player.get_action()
+            self._execute_action(player, start_location, end_location, is_half)
         for player in self.players.values():
             self._generate_obs(player)
         self._spawn()
@@ -117,7 +117,7 @@ class Map(object):
         if self.remaining_players > 1:
             self._run_turn()
 
-    def _execute_action(self, player, start_location, end_location):
+    def _execute_action(self, player, start_location, end_location, is_half=False):
         """Update maps to account for player PLAYER making an action from START_LOCATION to END_LOCATION."""
         if end_location is None:
             return
@@ -127,6 +127,8 @@ class Map(object):
                 and self.armies[s_x, s_y] > 1 \
                 and np.abs(s_x - e_x) + np.abs(s_y - e_y) == 1:
             moving = self.armies[s_x, s_y] - 1
+            if is_half:
+                moving //= 2  # round down or up? currently not sure
             self.armies[s_x, s_y] = 1
             if self.owner[e_x, e_y] == player.id_no:
                 self.armies[e_x, e_y] += moving
@@ -177,7 +179,7 @@ class Map(object):
         visible_owner = self.owner * seen
         return visible_terrain, visible_armies, visible_owner
 
-    def action(self, player_id, start_location, end_location): # is_half, player_id
+    def action(self, player_id, start_location, end_location, is_half=False):
         """Have the player with PLAYER_ID input an action from START_LOCATION to END_LOCATION.
         The action will not actually be executed at this time;
         rather, it will be added to a queue of actions to be taken in the future.
@@ -185,7 +187,7 @@ class Map(object):
         START_LOCATION and END_LOCATION are currently formatted as shape (2,) points.
         """
         if player_id in self.players:
-            self.players[player_id].set_action((start_location, end_location))
+            self.players[player_id].set_action((start_location, end_location, is_half))
             return self.players[player_id].get_output()
         print("Invalid player %d", player_id)
         raise

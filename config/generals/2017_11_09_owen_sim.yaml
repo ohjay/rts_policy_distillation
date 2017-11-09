@@ -55,5 +55,5 @@ dqn_arch:
   outputs:
     action:
       dtype: float32
-      shape: [5]  # five actions centered around active square
+      shape: [9]  # five actions centered around active square
       activation: X

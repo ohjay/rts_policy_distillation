@@ -71,29 +71,32 @@ class GeneralsSim(Environment):
     def _parse_action(self, action):
         """Obtains the (start_loc, end_loc) encoded by ACTION."""
         end_loc = copy.copy(self.active_sq)
-        if action == ACTION_UP:
+        if action in (ACTION_UP, ACTION_UP_50):
             end_loc[0] -= 1
-        elif action == ACTION_DOWN:
+        elif action in (ACTION_DOWN, ACTION_DOWN_50):
             end_loc[0] += 1
-        elif action == ACTION_LEFT:
+        elif action == (ACTION_LEFT, ACTION_LEFT_50):
             end_loc[1] -= 1
-        elif action == ACTION_RIGHT:
+        elif action == (ACTION_RIGHT, ACTION_RIGHT_50):
             end_loc[1] += 1
+        else:
+            end_loc = None
 
-        return self.active_sq, end_loc
+        is_half = action in (ACTION_UP_50, ACTION_DOWN_50, ACTION_LEFT_50, ACTION_RIGHT_50)
+        return self.active_sq, end_loc, is_half
 
     def get_random_action(self):
         """Get a random move."""
         return randint(0, 4)
 
-    def apply_action(self, action, random=False):
+    def apply_action(self, action):
         """Actions are formatted as integers from 0-4 representing the choice of move (up, down, left, right, noop).
         If the action is invalid, nothing will be done.
 
         Returns an (observation, reward, done) tuple that represents the result of taking the action.
         """
-        start_loc, end_loc = self._parse_action(action)
-        next_obs, _, done = self.map.action(self.player_id, start_loc, end_loc)  # our simulator handles noops
+        start_loc, end_loc, is_half = self._parse_action(action)
+        next_obs, _, done = self.map.action(self.player_id, start_loc, end_loc, is_half)  # our simulator handles noops
         next_obs = self._reformat_observation(next_obs)
 
         obs, self.prev_observation = self.prev_observation, next_obs
