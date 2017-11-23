@@ -25,7 +25,7 @@ _TURN_LIMIT = 50
 def land_dt(player, state, next_state, opponent_land_count):
     if state is None:
         return np.count_nonzero(next_state['friendly'])
-    return np.count_nonzero(state['friendly']) - np.count_nonzero(next_state['friendly'])
+    return np.count_nonzero(next_state['friendly']) - np.count_nonzero(state['friendly'])
 
 def win_loss(player, state, next_state, opponent_land_count):
     if not opponent_land_count:
@@ -169,8 +169,6 @@ class Map(object):
                      'friendly': visible_friendly, 'enemy': visible_enemy, 'cities': visible_cities, \
                      'opp_land': opponent_land_count, 'opp_army': opponent_army_count, 'last_location': player.last_location}
         reward = player.reward_fn(player, player.last_state, new_state, opponent_land_count) + player.invalid_penalty
-        if reward < player.invalid_penalty:
-            print("ERROR??")
         done = self.owner[player.general_loc] != player.id_no or self.num_players == 1 or self.turn_count >= _TURN_LIMIT
         player.set_output((new_state, reward, done))
 

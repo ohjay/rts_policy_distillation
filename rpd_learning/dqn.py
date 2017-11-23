@@ -253,7 +253,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
             print('timestep %d' % t)
             print('mean reward %.2f' % np.mean(last_episode_rewards))
-            print('recent rewards %r' % last_episode_rewards[-5:])
+            print('recent rewards %r' % last_episode_rewards)
             # print("mean reward (100 episodes) %f" % mean_episode_reward)
             # print("best mean reward %f" % best_mean_episode_reward)
             # print("episodes %d" % len(last_episode_rewards))
