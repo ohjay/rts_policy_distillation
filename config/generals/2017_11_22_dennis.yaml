@@ -23,13 +23,13 @@ dqn_arch:
   inputs:
     terrain:
       dtype: uint8
-      shape: [18, 18, 1]
+      shape: [18, 18]
     ownership:
       dtype: uint8
-      shape: [18, 18, 1]
+      shape: [18, 18]
     armies:
       dtype: uint8
-      shape: [18, 18, 1]
+      shape: [18, 18]
 
   layers:
     - inputs: [terrain, ownership, armies]

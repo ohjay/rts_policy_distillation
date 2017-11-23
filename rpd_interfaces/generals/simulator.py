@@ -123,10 +123,9 @@ class Map(object):
         if start_location == end_location:
             return
         s_x, s_y = start_location
-        e_x, e_y = end_location
+        e_x, e_y = end_location # and self.terrain[e_x, e_y] != _MOUNTAIN
         if self.owner[s_x, s_y] == player.id_no \
             and self.armies[s_x, s_y] > 1 \
-            and self.terrain[e_x, e_y] != _MOUNTAIN \
             and np.abs(s_x - e_x) + np.abs(s_y - e_y) == 1: 
             moving = self.armies[s_x, s_y] - 1
             self.armies[s_x, s_y] = 1
@@ -145,6 +144,8 @@ class Map(object):
                     prev_owner = self.owner[e_x, e_y]
                     self.owner[e_x, e_y] = player.id_no
             player.update_location(end_location)
+            if self.terrain[e_x, e_y] == _MOUNTAIN:
+                player.invalid_penalty = -1
         else:
             player.invalid_penalty = -1
             # print("Invalid action {} -> {}".format(start_location, end_location))
@@ -175,7 +176,7 @@ class Map(object):
 
     def _spawn(self):
         for x,y in self.cities:
-            if self.owner[x,y] != _NEUTRAL or self.armies[x,y] < _CITY_MAX_ARMY:
+            if self.owner[x,y] != _NEUTRAL: #or self.armies[x,y] < _CITY_MAX_ARMY:
                 self.armies[x,y] += 1
         for x,y in self.generals:
             self.armies[x,y] += 1

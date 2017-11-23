@@ -10,6 +10,7 @@ import sys
 import operator
 import functools, itertools
 import tensorflow as tf
+import numpy as np
 from collections import namedtuple
 
 from rpd_learning.dqn_utils import *
@@ -154,10 +155,11 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     mean_episode_reward = -float('nan')
     best_mean_episode_reward = -float('inf')
     last_obs_np = _obs_to_np(env.reset()[0][0])
-    log_freq = 100
+    log_freq = 300
     play_count = 0
     game_steps = 0
 
+    last_episode_rewards = []
     episode_rewards = []
 
     save_images = False
@@ -176,6 +178,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             # Choose action via epsilon greedy exploration
             eps = exploration.value(t)
             obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
+
             feed_dict = {}
             for input_name in obs_recent.keys():
                 shaped_val = np.reshape(obs_recent[input_name], (1,) + obs_recent[input_name].shape)
@@ -189,9 +192,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         replay_buffer.store_effect(idx, action, reward, done)
         if save_images and len(last_obs):
             env.get_image_of_state(last_obs).save("img/Game_{}_Step_{}.png".format(play_count, game_steps))
-            
+
         if done:
             last_obs_np = _obs_to_np(env.reset()[0][0])
+            last_episode_rewards = episode_rewards
             episode_rewards = []
             save_images = False
             play_count += 1
@@ -214,7 +218,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             obs_batch_np, act_batch, rew_batch, next_obs_batch_np, done_mask = replay_buffer.sample(batch_size)
             obs_batch = _np_to_obs(obs_batch_np)
             next_obs_batch = _np_to_obs(next_obs_batch_np)
-
             # Initialize the model
             if not model_initialized:
                 initialize_interdependent_variables(session, tf.global_variables(), merge_dicts(
@@ -236,23 +239,23 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             num_param_updates += 1
 
         # 4. Log progress
-        # episode_rewards = env.reward_history  # TODO separate rewards into episodes
-        # if len(episode_rewards) > 0:
-        #     mean_episode_reward = np.mean(episode_rewards[-100:])
-        # if len(episode_rewards) > 100:
+        # last_episode_rewards = env.reward_history  # TODO separate rewards into episodes
+        # if len(last_episode_rewards) > 0:
+        #     mean_episode_reward = np.mean(last_episode_rewards[-100:])
+        # if len(last_episode_rewards) > 100:
         #     best_mean_episode_reward = max(best_mean_episode_reward, mean_episode_reward)
         if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
             print('timestep %d' % t)
-            print('mean reward %.2f' % np.mean(episode_rewards))
-            print('recent rewards %r' % episode_rewards[-5:])
+            print('mean reward %.2f' % np.mean(last_episode_rewards))
+            print('recent rewards %r' % last_episode_rewards[-5:])
             # print("mean reward (100 episodes) %f" % mean_episode_reward)
             # print("best mean reward %f" % best_mean_episode_reward)
-            # print("episodes %d" % len(episode_rewards))
+            # print("episodes %d" % len(last_episode_rewards))
             print('exploration %f' % exploration.value(t))
             print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
             sys.stdout.flush()
 
             # Save network parameters
-            q_func.save(session, t, outfolder='q_func')
-            target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
+            # q_func.save(session, t, outfolder='q_func')
+            # target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
             save_images = True
