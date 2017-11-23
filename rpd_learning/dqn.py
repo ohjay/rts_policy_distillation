@@ -154,7 +154,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     num_param_updates = 0
     mean_episode_reward = -float('nan')
     best_mean_episode_reward = -float('inf')
-    last_obs_np = _obs_to_np(env.reset()[0][0])
+    player_output, _ = env.reset()
+    state, reward, done = player_output
+    last_obs_np = _obs_to_np(state)
     log_freq = 300
     play_count = 0
     game_steps = 0
@@ -188,13 +190,17 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             probabilities[np.argmax(q_values)] = 1.0 - eps
             action = np.random.choice(num_actions, p=probabilities)
 
-        last_obs, reward, done = env.step_simple(action, _NO_OP)[0]
+        player_output, _ = env.step_simple(action)
+        last_obs, reward, done = player_output
         replay_buffer.store_effect(idx, action, reward, done)
         if save_images and len(last_obs):
             env.get_image_of_state(last_obs).save("img/Game_{}_Step_{}.png".format(play_count, game_steps))
 
         if done:
-            last_obs_np = _obs_to_np(env.reset()[0][0])
+            player_output, _ = env.reset()
+            last_obs, reward, done = player_output
+            last_obs_np = _obs_to_np(last_obs)
+
             last_episode_rewards = episode_rewards
             episode_rewards = []
             save_images = False

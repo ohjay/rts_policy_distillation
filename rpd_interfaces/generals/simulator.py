@@ -13,17 +13,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 # Terrain
-_EMPTY = 0
-_GENERAL = 1
-_CITY = 2
-_MOUNTAIN = 3
-_FOG = 4
-_FOGGY_TERRAIN = 5
-_FOGGY_CITY = 6
-_FOGGY_MOUNTAIN = 7
-_NEUTRAL = 0
-
 _CITY_MAX_ARMY = 40
+
+_NEUTRAL = 0
 
 _MAP_SIZE = 18
 
@@ -32,8 +24,8 @@ _TURN_LIMIT = 50
 
 def land_dt(player, state, next_state, opponent_land_count):
     if state is None:
-        return np.sum(next_state['ownership'] == player.id_no)
-    return np.sum(next_state['ownership'] == player.id_no) - np.sum(state['ownership'] == player.id_no)
+        return np.count_nonzero(next_state['friendly'])
+    return np.count_nonzero(state['friendly']) - np.count_nonzero(next_state['friendly'])
 
 def win_loss(player, state, next_state, opponent_land_count):
     if not opponent_land_count:
@@ -76,37 +68,40 @@ class Map(object):
         self.width = _MAP_SIZE
         self.height = _MAP_SIZE
 
-        self.terrain = np.zeros((_MAP_SIZE, _MAP_SIZE))
+        self.mountains = np.zeros((_MAP_SIZE, _MAP_SIZE))
+        self.cities = np.zeros((_MAP_SIZE, _MAP_SIZE))
+        self.generals = np.zeros((_MAP_SIZE, _MAP_SIZE))
         self.armies = np.zeros((_MAP_SIZE, _MAP_SIZE))
         self.owner = np.zeros((_MAP_SIZE, _MAP_SIZE))
+
         self.turn_count = 1
         self.grid = np.vstack(np.mgrid[:self.width, :self.height].T)
         self.num_players = 0
         self.players = {}
-        self.cities = []
-        self.generals = []
+        self.cities_list = []
+        self.generals_list = []
 
     def add_army(self, pos, player, army):
         self.owner[pos[0], pos[1]] = player
         self.armies[pos[0], pos[1]] = army
 
     def add_mountain(self, pos):
-        self.terrain[pos[0], pos[1]] = _MOUNTAIN
+        self.mountains[pos[0], pos[1]] = 1
 
     def add_city(self, pos, army):
-        self.terrain[pos[0], pos[1]] = _CITY
+        self.cities[pos[0], pos[1]] = 1
         self.armies[pos[0], pos[1]] = army
-        self.cities.append(pos)
+        self.cities_list.append(pos)
 
     def add_general(self, pos, player_id=-1):
         self.num_players += 1
         if player_id == -1:
             player_id = self.num_players
-        self.terrain[pos[0], pos[1]] = _GENERAL
+        self.generals[pos[0], pos[1]] = 1
         self.owner[pos[0], pos[1]] = player_id
         self.armies[pos[0], pos[1]] = 1
         self.players[player_id] = Player(player_id, pos)
-        self.generals.append(pos)
+        self.generals_list.append(pos)
 
     def update(self, fast_mode=False):
         for player in self.players.values():
@@ -114,7 +109,7 @@ class Map(object):
                 start_location, end_location = player.get_action()
                 self._execute_action(player, start_location, end_location)
         self._spawn()
-        if not fast_mode:
+        if not fast_mode: # ?
             for player in self.players.values():
                 self._generate_obs(player)
         self.turn_count += 1
@@ -134,7 +129,7 @@ class Map(object):
             else:
                 self.armies[e_x, e_y] -= moving
                 if self.armies[e_x, e_y] < 0:
-                    if self.terrain[e_x, e_y] == _GENERAL:
+                    if self.generals[e_x, e_y]:
                         defeated = self.owner[e_x, e_y]
                         defeated_map = (self.owner == defeated)
                         diff = defeated - player.id_no
@@ -144,41 +139,46 @@ class Map(object):
                     prev_owner = self.owner[e_x, e_y]
                     self.owner[e_x, e_y] = player.id_no
             player.update_location(end_location)
-            if self.terrain[e_x, e_y] == _MOUNTAIN:
+            if self.mountains[e_x, e_y]:
                 player.invalid_penalty = -1
         else:
             player.invalid_penalty = -1
             # print("Invalid action {} -> {}".format(start_location, end_location))
 
     def _generate_obs(self, player):
-        done = self.owner[player.general_loc] != player.id_no or self.num_players == 1
-
-        if self.turn_count >= _TURN_LIMIT or done:
-            player.set_output(({}, 0, True))
-            return
-
-        player_owned = np.transpose((self.owner == player.id_no).nonzero())
+        friendly = self.owner == player.id_no
+        neutral = self.owner == _NEUTRAL
+        enemy = np.logical_xor(np.logical_not(friendly), neutral)
+        player_owned = np.transpose(friendly.nonzero())
         distances = np.min(cdist(self.grid, player_owned, 'euclidean'), axis=1).reshape(self.height, self.width).T
-        seen = distances <= 1.5
+        seen = (distances <= 1.5).astype(np.uint8)
+        
+        visible_mountains = seen * self.mountains
+        visible_generals = seen * self.generals
         fog = 1 - seen
-        visible_terrain = self.terrain * seen + fog * _FOG + self.terrain * (self.terrain != _GENERAL) * fog
-        visible_terrain[visible_terrain == _FOGGY_CITY] = _FOGGY_TERRAIN
-        visible_terrain[visible_terrain == _FOGGY_MOUNTAIN] = _FOGGY_TERRAIN
-        visible_armies = self.armies * seen
-        visible_owner = self.owner * seen
-        opponent_owned = self.owner == self.other_player(player.id_no)
-        opponent_land_count = np.sum(opponent_owned)
-        opponent_army_count = np.sum(self.armies[opponent_owned])
-        new_state = {'terrain': visible_terrain, 'ownership': visible_owner, 'armies': visible_armies, \
+        hidden_terrain = fog * (self.cities + self.mountains)
+        visible_armies = seen * self.armies
+        visible_friendly = visible_armies * friendly
+        visible_enemy = visible_armies * enemy
+        visible_cities = visible_armies * self.cities
+
+        opponent_land_count = np.sum(enemy)
+        opponent_army_count = np.sum(self.armies * enemy)
+
+        new_state = {'mountains': visible_mountains, 'generals': visible_generals, 'hidden_terrain': hidden_terrain, 'fog': fog, \
+                     'friendly': visible_friendly, 'enemy': visible_enemy, 'cities': visible_cities, \
                      'opp_land': opponent_land_count, 'opp_army': opponent_army_count, 'last_location': player.last_location}
         reward = player.reward_fn(player, player.last_state, new_state, opponent_land_count) + player.invalid_penalty
+        if reward < player.invalid_penalty:
+            print("ERROR??")
+        done = self.owner[player.general_loc] != player.id_no or self.num_players == 1 or self.turn_count >= _TURN_LIMIT
         player.set_output((new_state, reward, done))
 
     def _spawn(self):
-        for x,y in self.cities:
-            if self.owner[x,y] != _NEUTRAL: #or self.armies[x,y] < _CITY_MAX_ARMY:
+        for x,y in self.cities_list:
+            if self.owner[x,y] != _NEUTRAL or self.armies[x,y] < _CITY_MAX_ARMY:
                 self.armies[x,y] += 1
-        for x,y in self.generals:
+        for x,y in self.generals_list:
             self.armies[x,y] += 1
 
         if self.turn_count % 25 == 0:
@@ -203,14 +203,6 @@ class Map(object):
             return
         raise ValueError
 
-    def other_player(self, player_id):
-        if player_id == 1:
-            return 2
-        return 1
-
-    def __str__(self):
-        return "{} \n {} \n {} \n".format(self.terrain, self.armies, self.owner)
-
 class GeneralsEnv:
     def __init__(self, root_dir):
         listdir = os.listdir(root_dir)
@@ -222,22 +214,33 @@ class GeneralsEnv:
         self.map.update()
         return [x.get_output() for x in self.map.players.values()]
 
-    def step(self, action1, action2):
+    def step(self, action1, action2=None):
         """Takes two tuples of (start_location, end_location).
         Action 1 is for player 1, 2 is for player 2
         Returns: (state1, reward1, dead1), (state2, reward2, dead2)
         """
         self.map.action(1, action1[0], self._get_movement_for_action(action1[0], action1[1]))
-        self.map.action(2, action2[0], self._get_movement_for_action(action2[0], action2[1]))
+        if action2:
+            self.map.action(2, action2[0], self._get_movement_for_action(action2[0], action2[1]))
         self.map.update()
-        return [x.get_output() for x in self.map.players.values()]
+        out1 = self.map.players[1].get_output()
+        out2 = None
+        if action2:
+            out2 = self.map.players[2].get_output()
+        return out1, out2
 
-    def step_simple(self, action1, action2):
+    def step_simple(self, action1, action2=None):
         """Takes two directions, and moves each agent in the corresponding direction"""
+        # TODO: wtf
         self.map.action_simple(1, self._get_movement_for_action((0, 0), action1))
-        self.map.action_simple(2, self._get_movement_for_action((0, 0), action2))
+        if action2:
+            self.map.action_simple(2, self._get_movement_for_action((0, 0), action2))
         self.map.update()
-        return [x.get_output() for x in self.map.players.values()]
+        out1 = self.map.players[1].get_output()
+        out2 = None
+        if action2:
+            out2 = self.map.players[2].get_output()
+        return out1, out2
 
     def _get_movement_for_action(self, initial, direction):
         """Maps 0, 1, 2, 3, 4 to up, down, left, right, stay"""
@@ -267,37 +270,64 @@ class GeneralsEnv:
         return index // _MAP_SIZE, index % _MAP_SIZE
 
     def get_image_of_state(self, state):
-        terrain, armies, owner = state['terrain'], state['armies'], state['ownership']
+        mountains = state['mountains']
+        generals = state['generals'] 
+        hidden_terrain = state['hidden_terrain']
+        fog = state['fog']
+        friendly = state['friendly']
+        enemy = state['enemy']
+        cities = state['cities']
+        last_location = state['last_location']
+
         size = 400
         step = size / _MAP_SIZE
         image = Image.new('RGBA', (size, size), (255, 255, 255, 255))
         d = ImageDraw.Draw(image)
         colors = [
-            (255, 255, 255, 255), # Empty - white
-            (), # General - no color
-            (0, 136, 34, 255), # City - Green
-            (128, 64, 0, 255), # Mountain - Brown
-            (32, 32, 32, 255), # Fog - Dark Grey
-            (124, 124, 124, 255), # Terrain Fog - Grey
-            (0, 0, 255, 255), # Blue player
-            (255, 0, 0, 255) # Red player
+            (255, 255, 255, 255),   # 0 - Empty - white
+            (),                     # 1 - General - no color
+            (0, 136, 34, 255),      # 2 - City - Green
+            (128, 64, 0, 255),      # 3 - Mountain - Brown
+            (32, 32, 32, 255),      # 4 - Fog - Dark Grey
+            (124, 124, 124, 255),   # 5 - Terrain Fog - Grey
+            (0, 0, 255, 255),       # 6 - Blue player
+            (255, 0, 0, 255),        # 7 - Red player
+            (0, 0, 100, 255)        # 8 - Blue player last location - Dark Blue
         ]
         dir = os.path.dirname(__file__)
         font = ImageFont.truetype(os.path.join(dir, 'FreeMono.ttf'), 40)
         for i in range(_MAP_SIZE):
             for j in range(_MAP_SIZE):
-                if owner[i, j] > 0:
-                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[int(owner[i, j]) + 5])
-                else:
-                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[int(terrain[i, j])])
-                if armies[i, j] > 0:
+                d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[0])
+                if mountains[i,j]: # Hack
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[3])
+                if friendly[i, j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[6])
                     general = ''
-                    if terrain[i, j] == _GENERAL:
+                    if generals[i, j]:
                         general = '*'
-                    d.text((i * step + step//4, j * step + step//4), str(int(armies[i, j])) + general, fill=colors[0])
-                if terrain[i, j] == _MOUNTAIN:
+                    d.text((i * step + step//4, j * step + step//4), str(int(friendly[i, j])) + general, fill=colors[0])
+                if enemy[i,j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[7])
+                    general = ''
+                    if generals[i, j]:
+                        general = '*'
+                    d.text((i * step + step//4, j * step + step//4), str(int(enemy[i, j])) + general, fill=colors[0])
+                if cities[i,j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[2])
+                    d.text((i * step + step//4, j * step + step//4), str(int(cities[i, j])), fill=colors[0])
+                if mountains[i,j]:
                     d.text((i * step + step//4, j * step + step//4), '^^', fill=colors[0])
-                if terrain[i, j] == _FOGGY_TERRAIN:
+                if fog[i,j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[4])
+                if hidden_terrain[i,j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[5])
                     d.text((i * step + step//4, j * step + step//4), '??', fill=colors[0])
+                if (i,j) == last_location:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[8])
+                    general = ''
+                    if generals[i, j]:
+                        general = '*'
+                    d.text((i * step + step//4, j * step + step//4), str(int(friendly[i, j])) + general, fill=colors[0])
         del d
         return image
