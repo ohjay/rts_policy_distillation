@@ -47,7 +47,7 @@ def train(env, config):
 
     dqn.learn(env, config, optimizer_spec=optimizer, session=session, exploration=exploration_schedule,
               stopping_criterion=stopping_criterion, replay_buffer_size=1000000, batch_size=32, gamma=0.99,
-              learning_starts=50000, learning_freq=4, frame_history_len=1, target_update_freq=10000, grad_norm_clipping=10)
+              learning_starts=50000, learning_freq=1, frame_history_len=1, target_update_freq=10000, grad_norm_clipping=10)
 
     if hasattr(env, 'close'):  # cleanup, if applicable
         env.close()
@@ -68,10 +68,9 @@ def run(config):
         user_id = env_info['user_id']
         env = generals.Generals(user_id)
     elif config['env'] == 'generals_sim':
-        from rpd_interfaces.generals import generals_sim
-        map_shape = (env_info['map_height'], env_info['map_width'])
-        map_player_count = env_info['map_player_count']
-        env = generals_sim.GeneralsSim(map_shape, map_player_count)
+        from rpd_interfaces.generals.simulator import GeneralsEnv
+        env = GeneralsEnv('replays_prod/')
+
 
     eval(config['operation'])(env, config)
 

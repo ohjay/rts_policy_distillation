@@ -17,6 +17,8 @@ from rpd_learning.models import Model
 
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
 
+_NO_OP = 4
+
 def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(1000000, 0.1), stopping_criterion=None,
           replay_buffer_size=1000000, batch_size=32, gamma=0.99, learning_starts=50000, learning_freq=4,
           frame_history_len=4, target_update_freq=10000, grad_norm_clipping=10):
@@ -79,7 +81,11 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         for input_name in sorted(arch['inputs'].keys()):
             shape = arch['inputs'][input_name]['shape']
             size = functools.reduce(operator.mul, shape, 1)
-            obs[input_name] = np.reshape(obs_np[i:i+size], shape)
+            if obs_np.shape[0] == batch_size:
+                shape = np.insert(shape, 0, obs_np.shape[0])
+                obs[input_name] = np.reshape(obs_np[:, i:i+size], shape)
+            else:
+                obs[input_name] = np.reshape(obs_np[i:i+size], shape)
             i += size
         return obs
 
@@ -111,7 +117,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     # Create networks (for current/next Q-values)
     q_func = Model(arch, inputs=obs_t_ph_float, scope='q_func', reuse=False)  # model to use for computing the q-function
     target_q_func = Model(arch, inputs=obs_tp1_ph_float, scope='target_q_func', reuse=False)
+    
     q_func_out = q_func.outputs['action']
+    # q_x_out = q_func.outputs['target_x']
+    # q_y_out = q_func.outputs['target_y']
     target_out = target_q_func.outputs['action']
 
     # Compute the Bellman error
@@ -144,8 +153,14 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     num_param_updates = 0
     mean_episode_reward = -float('nan')
     best_mean_episode_reward = -float('inf')
-    last_obs_np = _obs_to_np(env.reset())
-    log_freq = 10000
+    last_obs_np = _obs_to_np(env.reset()[0][0])
+    log_freq = 100
+    play_count = 0
+    game_steps = 0
+
+    episode_rewards = []
+
+    save_images = False
 
     for t in itertools.count():
         # 1. Check stopping criterion
@@ -170,11 +185,21 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             probabilities[np.argmax(q_values)] = 1.0 - eps
             action = np.random.choice(num_actions, p=probabilities)
 
-        last_obs, reward, done = env.apply_action(action)
-        last_obs_np = _obs_to_np(last_obs)
+        last_obs, reward, done = env.step_simple(action, _NO_OP)[0]
         replay_buffer.store_effect(idx, action, reward, done)
+        if save_images and len(last_obs):
+            env.get_image_of_state(last_obs).save("img/Game_{}_Step_{}.png".format(play_count, game_steps))
+            
         if done:
-            last_obs_np = _obs_to_np(env.reset())
+            last_obs_np = _obs_to_np(env.reset()[0][0])
+            episode_rewards = []
+            save_images = False
+            play_count += 1
+            game_steps = 0
+        else:
+            last_obs_np = _obs_to_np(last_obs)
+            episode_rewards.append(reward)
+            game_steps += 1
 
         # At this point, the environment should have been advanced one step (and
         # reset if done was true), last_obs_np should point to the new latest observation,
@@ -211,12 +236,12 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             num_param_updates += 1
 
         # 4. Log progress
-        episode_rewards = env.reward_history  # TODO separate rewards into episodes
+        # episode_rewards = env.reward_history  # TODO separate rewards into episodes
         # if len(episode_rewards) > 0:
         #     mean_episode_reward = np.mean(episode_rewards[-100:])
         # if len(episode_rewards) > 100:
         #     best_mean_episode_reward = max(best_mean_episode_reward, mean_episode_reward)
-        if t % log_freq == 0 and model_initialized:
+        if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
             print('timestep %d' % t)
             print('mean reward %.2f' % np.mean(episode_rewards))
             print('recent rewards %r' % episode_rewards[-5:])
@@ -230,3 +255,4 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             # Save network parameters
             q_func.save(session, t, outfolder='q_func')
             target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
+            save_images = True
