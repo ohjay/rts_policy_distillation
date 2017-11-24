@@ -19,7 +19,7 @@ _NEUTRAL = 0
 
 _MAP_SIZE = 18
 
-_TURN_LIMIT = 50
+_TURN_LIMIT = 100
 
 
 def land_dt(player, state, next_state, opponent_land_count):
@@ -122,6 +122,7 @@ class Map(object):
         if self.owner[s_x, s_y] == player.id_no \
             and self.armies[s_x, s_y] > 1 \
             and np.abs(s_x - e_x) + np.abs(s_y - e_y) == 1: 
+
             moving = self.armies[s_x, s_y] - 1
             self.armies[s_x, s_y] = 1
             if self.owner[e_x, e_y] == player.id_no:
@@ -139,10 +140,12 @@ class Map(object):
                     prev_owner = self.owner[e_x, e_y]
                     self.owner[e_x, e_y] = player.id_no
             player.update_location(end_location)
-            if self.mountains[e_x, e_y]:
-                player.invalid_penalty = -1
+
+            # if self.mountains[e_x, e_y]:
+            #     player.invalid_penalty = -1
         else:
-            player.invalid_penalty = -1
+            pass
+            # player.invalid_penalty = -1
             # print("Invalid action {} -> {}".format(start_location, end_location))
 
     def _generate_obs(self, player):
@@ -184,8 +187,8 @@ class Map(object):
             self.armies += player_owned
 
     def action(self, player_id, start_location, end_location): # is_half, player_id
-        if player_id in self.players and self.owner[start_location] == player_id:
-            if 0 <= end_location[0] < _MAP_SIZE and 0 <= end_location[1] < _MAP_SIZE and self.armies[start_location] > 1:
+        if player_id in self.players:
+            if 0 <= end_location[0] < _MAP_SIZE and 0 <= end_location[1] < _MAP_SIZE:
                 self.players[player_id].set_action((start_location, end_location))
             return
         raise ValueError
@@ -196,7 +199,7 @@ class Map(object):
             if self.owner[start_location] != player_id or self.armies[start_location] <= 2:
                 start_location = self.players[player_id].general_loc
             end_location = (start_location[0] + direction[0], start_location[1] + direction[1])
-            if 0 <= end_location[0] < _MAP_SIZE and 0 <= end_location[1] < _MAP_SIZE and self.armies[start_location] > 1:
+            if 0 <= end_location[0] < _MAP_SIZE and 0 <= end_location[1] < _MAP_SIZE:
                 self.players[player_id].set_action((start_location, end_location))
             return
         raise ValueError
@@ -213,13 +216,15 @@ class GeneralsEnv:
         return [x.get_output() for x in self.map.players.values()]
 
     def step(self, action1, action2=None):
-        """Takes two tuples of (start_location, end_location).
+        """Takes two tuples of (x, y, dir).
         Action 1 is for player 1, 2 is for player 2
         Returns: (state1, reward1, dead1), (state2, reward2, dead2)
         """
-        self.map.action(1, action1[0], self._get_movement_for_action(action1[0], action1[1]))
+        start_loc1 = (action1[0], action1[1])
+        self.map.action(1, start_loc1, self._get_movement_for_action(start_loc1, action1[2]))
         if action2:
-            self.map.action(2, action2[0], self._get_movement_for_action(action2[0], action2[1]))
+            start_loc2 = (action2[0], action2[1])
+            self.map.action(2, start_loc2, self._get_movement_for_action(start_loc2, action2[2]))
         self.map.update()
         out1 = self.map.players[1].get_output()
         out2 = None
@@ -262,7 +267,13 @@ class GeneralsEnv:
 
     def get_random_action(self):
         """Get a random move."""
-        return randint(0, 4)
+        return np.array((randint(0, 17), randint(0, 17), randint(0, 3)))
+
+    def get_random_semi_valid_action(self, player):
+        valid_start = np.logical_and(self.map.owner == player, self.map.armies > 1)
+        valid_start = np.transpose(valid_start.nonzero())
+        start = valid_start[randint(0, len(valid_start) - 1)]
+        return np.array((start[0], start[1], randint(0, 3)))
 
     def _flat_to_2d(self, index):
         return index // _MAP_SIZE, index % _MAP_SIZE

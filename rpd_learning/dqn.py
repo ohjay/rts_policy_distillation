@@ -15,6 +15,8 @@ from collections import namedtuple
 
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
+from random import random
+
 
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
 
@@ -65,7 +67,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     ###############
 
     arch = config['dqn_arch']
-    num_actions = arch['outputs']['action']['shape'][0]
+    num_dir = arch['outputs']['direction']['shape'][0]
+    num_x = arch['outputs']['target_x']['shape'][0]
+    num_y = arch['outputs']['target_y']['shape'][0]
+
 
     def _obs_to_np(obs):
         """Reformats observation as a single NumPy array.
@@ -101,7 +106,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             obs_t_ph_float[input_name] = obs_t_ph[input_name]
         else:  # casting to float on GPU ensures lower data transfer times
             obs_t_ph_float[input_name] = tf.cast(obs_t_ph[input_name], tf.float32) / 255.0
-    act_t_ph = tf.placeholder(tf.int32, [None])  # current action
+    act_t_x_ph = tf.placeholder(tf.int32, [None]) # current action
+    act_t_y_ph = tf.placeholder(tf.int32, [None])
+    act_t_dir_ph = tf.placeholder(tf.int32, [None])  
     rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
     obs_tp1_ph = {input_name: None for input_name in arch['inputs'].keys()}  # next observation (or state)
     obs_tp1_ph_float = {input_name: None for input_name in arch['inputs'].keys()}
@@ -119,15 +126,24 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     q_func = Model(arch, inputs=obs_t_ph_float, scope='q_func', reuse=False)  # model to use for computing the q-function
     target_q_func = Model(arch, inputs=obs_tp1_ph_float, scope='target_q_func', reuse=False)
     
-    q_func_out = q_func.outputs['action']
-    # q_x_out = q_func.outputs['target_x']
-    # q_y_out = q_func.outputs['target_y']
-    target_out = target_q_func.outputs['action']
+    q_dir_out = q_func.outputs['direction']
+    q_x_out = q_func.outputs['target_x']
+    q_y_out = q_func.outputs['target_y']
+    target_dir_out = target_q_func.outputs['direction']
+    target_x_out = target_q_func.outputs['target_x']
+    target_y_out = target_q_func.outputs['target_y']
 
     # Compute the Bellman error
-    q_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph, num_actions), q_func_out), axis=1)
-    y_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1))
-    total_error = tf.reduce_mean(tf.square(y_j - q_j))  # scalar valued tensor representing Bellman error (evaluate the current and next Q-values and construct corresponding error)
+    q_x_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_x_ph, num_x), q_x_out), axis=1)
+    y_x_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_x_out), axis=1))
+    q_y_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_y_ph, num_y), q_y_out), axis=1)
+    y_y_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_y_out), axis=1))
+    q_dir_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_dir_ph, num_dir), q_dir_out), axis=1)
+    y_dir_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_dir_out), axis=1))
+
+    total_error = tf.reduce_mean(tf.square(y_x_j - q_x_j)) + \
+                  tf.reduce_mean(tf.square(y_y_j - q_y_j)) + \
+                  tf.reduce_mean(tf.square(y_dir_j - q_dir_j)) # scalar valued tensor representing Bellman error (evaluate the current and next Q-values and construct corresponding error)
     q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')  # all vars in Q-function network
     target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')  # all vars in target network
 
@@ -157,7 +173,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     player_output, _ = env.reset()
     state, reward, done = player_output
     last_obs_np = _obs_to_np(state)
-    log_freq = 300
+    log_freq = 150
     play_count = 0
     game_steps = 0
 
@@ -173,24 +189,25 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
         # 2. Step the env and store the transition in the replay buffer
         idx = replay_buffer.store_frame(last_obs_np)
-        if not model_initialized:
+        eps = exploration.value(t)
+        if not model_initialized or random() < eps:
             # If first step, choose a random action
-            action = env.get_random_action()
+            action = env.get_random_semi_valid_action(1)
         else:
             # Choose action via epsilon greedy exploration
-            eps = exploration.value(t)
             obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
-
             feed_dict = {}
             for input_name in obs_recent.keys():
                 shaped_val = np.reshape(obs_recent[input_name], (1,) + obs_recent[input_name].shape)
                 feed_dict[obs_t_ph[input_name]] = shaped_val
-            q_values = session.run(q_func_out, feed_dict=feed_dict)
-            probabilities = np.full(num_actions, float(eps) / (num_actions - 1))
-            probabilities[np.argmax(q_values)] = 1.0 - eps
-            action = np.random.choice(num_actions, p=probabilities)
+            q_x = session.run(q_x_out, feed_dict=feed_dict)
+            q_y = session.run(q_y_out, feed_dict=feed_dict)
+            q_dir = session.run(q_dir_out, feed_dict=feed_dict)
 
-        player_output, _ = env.step_simple(action)
+            act_x, act_y, act_dir = np.argmax(q_x), np.argmax(q_y), np.argmax(q_dir)
+            action = np.array((act_x, act_y, act_dir))
+
+        player_output, _ = env.step(action)
         last_obs, reward, done = player_output
         replay_buffer.store_effect(idx, action, reward, done)
         if save_images and len(last_obs):
@@ -236,7 +253,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             session.run(train_fn, merge_dicts(
                 {obs_t_ph[input_name]: obs_batch[input_name] for input_name in obs_batch.keys()},
                 {obs_tp1_ph[input_name]: next_obs_batch[input_name] for input_name in next_obs_batch.keys()},
-                {act_t_ph: act_batch, rew_t_ph: rew_batch, done_mask_ph: done_mask, learning_rate: optimizer_spec.lr_schedule.value(t)}
+                {act_t_x_ph: act_batch[:,0], act_t_y_ph: act_batch[:,1], act_t_dir_ph: act_batch[:,2],  
+                 rew_t_ph: rew_batch, done_mask_ph: done_mask, learning_rate: optimizer_spec.lr_schedule.value(t)}
             ))
 
             # Periodically update the target network

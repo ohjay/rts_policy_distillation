@@ -43,7 +43,7 @@ def train(env, config):
     def stopping_criterion(env, t):
         return t > 8e7  # TODO idk
 
-    exploration_schedule = PiecewiseSchedule([(0, 0.2), (1e6, 0.1), (num_iterations / 2, 0.01)], outside_value=0.01)
+    exploration_schedule = PiecewiseSchedule([(0, 0.8), (5e6, 0.2), (num_iterations / 2, 0.1), (num_iterations, 0.01)], outside_value=0.01)
 
     dqn.learn(env, config, optimizer_spec=optimizer, session=session, exploration=exploration_schedule,
               stopping_criterion=stopping_criterion, replay_buffer_size=1000000, batch_size=32, gamma=0.99,
