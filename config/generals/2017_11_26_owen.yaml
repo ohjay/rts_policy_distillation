@@ -33,7 +33,7 @@ dqn_arch:
 #      dtype: float32
 #      shape: [18, 18]
     friendly:
-      dtype: float32
+      dtype: uint8
       shape: [18, 18]
 #    enemy:
 #      dtype: float32
@@ -48,28 +48,32 @@ dqn_arch:
       num_outputs: 32
       kernel_size: 8
       stride: 4
-      batch_norm: True
+      batch_norm: False
       activation: elu
-    - type: conv2d
-      num_outputs: 64
-      kernel_size: 4
-      stride: 2
-      batch_norm: True
-      activation: elu
+#    - type: conv2d
+#      num_outputs: 64
+#      kernel_size: 4
+#      stride: 2
+#      batch_norm: False
+#      activation: elu
     - type: conv2d
       num_outputs: 64
       kernel_size: 3
       stride: 1
+      batch_norm: False
+      activation: elu
+    - type: fc
+      num_outputs: 256
       batch_norm: True
       activation: elu
     - type: fc
-      num_outputs: 128
+      num_outputs: 256
       batch_norm: True
       activation: elu
 
   outputs:
     action:
-      dtype: float32
+      dtype: int32
       shape: [1296] # 18 * 18 * 4
       activation: X
 
