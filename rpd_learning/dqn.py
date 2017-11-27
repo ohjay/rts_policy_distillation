@@ -249,8 +249,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 # Compute observation mean and standard deviation (for use in normalization)
                 _obs_np, _, _, _, _ = replay_buffer.sample(replay_buffer.num_in_buffer - 1)
                 _obs = _np_to_obs(_obs_np, batched=True)
-                obs_mean = {input_name: np.mean(_obs[input_name], axis=0)}
-                obs_std = {input_name: np.std(_obs[input_name], axis=0)}
+                obs_mean = {input_name: np.mean(_obs[input_name], axis=0) for input_name in _obs.keys()}
+                obs_std = {input_name: np.std(_obs[input_name], axis=0) for input_name in _obs.keys()}
                 _obs_np, _obs = None, None
 
                 initialize_interdependent_variables(session, tf.global_variables(), merge_dicts(
