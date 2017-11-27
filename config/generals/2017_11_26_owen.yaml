@@ -49,19 +49,23 @@ dqn_arch:
       num_outputs: 32
       kernel_size: 8
       stride: 4
+      batch_norm: True
       activation: elu
     - type: conv2d
       num_outputs: 64
       kernel_size: 4
       stride: 2
+      batch_norm: True
       activation: elu
     - type: conv2d
       num_outputs: 64
       kernel_size: 3
       stride: 1
+      batch_norm: True
       activation: elu
     - type: fc
       num_outputs: 512
+      batch_norm: True
       activation: elu
 
   outputs:
