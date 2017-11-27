@@ -322,6 +322,19 @@ class GeneralsEnv:
         start_location = valid_start[dist.argmin()]
         return start_location[0], start_location[1], action[2]
 
+    def get_valid_action_from_q_values(self, q_x, q_y, q_dir, player_id=1):
+        """
+        Select the VALID (x, y) with the highest q_x[x] + q_y[y].
+        Select the dir with the highest q_dir[dir].
+
+        * assuming x is vertical (first index into NumPy arrays), and y is horizontal
+        """
+        q_xy = np.repeat(q_x[:, None], _MAP_SIZE, axis=1) + np.repeat(q_y[None, :], _MAP_SIZE, axis=0)
+        q_xy_valid = q_xy * np.logical_and(self.map.owner == player_id, self.map.armies > 1)
+        act_x, act_y = np.unravel_index(np.argmax(q_xy_valid), q_xy_valid.shape)
+        act_dir = np.argmax(q_dir)
+        return act_x, act_y, act_dir
+
     def _flat_to_2d(self, index):
         return index // _MAP_SIZE, index % _MAP_SIZE
 

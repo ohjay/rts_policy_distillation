@@ -181,6 +181,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     last_episode_rewards = []
     episode_rewards = []
 
+    mean_episode_rewards = []
+    max_episode_rewards = []
+
     save_images = False
 
     for t in itertools.count():
@@ -205,7 +208,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             q_y = session.run(q_y_out, feed_dict=feed_dict)
             q_dir = session.run(q_dir_out, feed_dict=feed_dict)
 
-            act_x, act_y, act_dir = np.argmax(q_x), np.argmax(q_y), np.argmax(q_dir)
+            act_x, act_y, act_dir = env.get_valid_action_from_q_values(q_x, q_y, q_dir)
             action = np.array((act_x, act_y, act_dir))
             action = env.get_nearest_valid_action(action)
 
@@ -225,6 +228,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             last_obs_np = _obs_to_np(last_obs)
 
             last_episode_rewards = episode_rewards
+            mean_episode_rewards.append(np.mean(episode_rewards))
+            max_episode_rewards.append(np.max(episode_rewards))
             episode_rewards = []
             save_images = False
             play_count += 1
@@ -276,7 +281,14 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         #     best_mean_episode_reward = max(best_mean_episode_reward, mean_episode_reward)
         if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
             print('timestep %d' % t)
-            print('mean reward %.2f' % np.mean(last_episode_rewards))
+            print('---')
+            print('mean of max episode rewards %.2f' % np.mean(max_episode_rewards))
+            print('best max episode reward %.2f' % np.max(max_episode_rewards))
+            print('------')
+            print('mean of past 100 max episode_rewards: %.2f' % np.mean(max_episode_rewards[-100:]))
+            print('best of past 100 max episode rewards %.2f' % np.max(max_episode_rewards[-100:]))
+            print('---------')
+            print('mean of recent rewards %.2f' % np.mean(last_episode_rewards))
             print('recent rewards %r' % last_episode_rewards)
             # print("mean reward (100 episodes) %f" % mean_episode_reward)
             # print("best mean reward %f" % best_mean_episode_reward)
