@@ -2,7 +2,10 @@
 
 import numpy as np
 from scipy.spatial.distance import cdist
-import queue
+try:
+    import queue
+except ImportError:
+    import multiprocessing as queue
 from random import randint
 import json
 import os
@@ -119,6 +122,13 @@ class Map(object):
             for player in self.players.values():
                 self._generate_obs(player)
         self.turn_count += 1
+
+    def is_valid_action(self, player, start_location, end_location):
+        """Does not do boundary checks."""
+        s_x, s_y = start_location
+        e_x, e_y = end_location
+        return self.owner[s_x, s_y] == player.id_no \
+               and self.armies[s_x, s_y] > 1 and np.abs(s_x - e_x) + np.abs(s_y - e_y) == 1
 
     def _execute_action(self, player, start_location, end_location):
         if start_location == end_location:
@@ -283,11 +293,34 @@ class GeneralsEnv:
         """Get a random move."""
         return np.array((randint(0, 17), randint(0, 17), randint(0, 3)))
 
-    def get_random_semi_valid_action(self, player):
-        valid_start = np.logical_and(self.map.owner == player, self.map.armies > 1)
+    def get_random_semi_valid_action(self, player_id):
+        valid_start = np.logical_and(self.map.owner == player_id, self.map.armies > 1)
         valid_start = np.transpose(valid_start.nonzero())
         start = valid_start[randint(0, len(valid_start) - 1)]
         return np.array((start[0], start[1], randint(0, 3)))
+
+    def is_friendly_square(self, x, y, player_id=1):
+        return self.map.owner[x, y] == player_id
+
+    def is_valid_action(self, action):
+        start_location = (action[0], action[1])
+        end_location = self._get_movement_for_action(start_location, action[2])
+        return self.map.is_valid_action(self.map.players[1], start_location, end_location)
+
+    def get_nearest_valid_action(self, action, player_id=1):
+        """Returns the action closest to ACTION that is actually valid.
+        Only the square will ever be changed: it will become the nearest square that is owned by player PLAYER_ID
+        and has > 1 army unit on it. If player PLAYER_ID has no valid moves, the input action will be returned.
+        """
+        if self.is_valid_action(action):
+            return action
+        valid_start = np.logical_and(self.map.owner == player_id, self.map.armies > 1)
+        valid_start = np.transpose(valid_start.nonzero())
+        if len(valid_start) == 0:
+            return action
+        dist = (valid_start[:, 0] - action[0]) ** 2 + (valid_start[:, 1] - action[1]) ** 2
+        start_location = valid_start[dist.argmin()]
+        return start_location[0], start_location[1], action[2]
 
     def _flat_to_2d(self, index):
         return index // _MAP_SIZE, index % _MAP_SIZE

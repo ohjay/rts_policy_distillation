@@ -207,6 +207,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
             act_x, act_y, act_dir = np.argmax(q_x), np.argmax(q_y), np.argmax(q_dir)
             action = np.array((act_x, act_y, act_dir))
+            action = env.get_nearest_valid_action(action)
 
         player_output, _ = env.step(action)
         last_obs, reward, done = player_output
