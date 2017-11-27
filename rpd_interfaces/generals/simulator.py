@@ -327,9 +327,10 @@ class GeneralsEnv:
         Select the VALID (x, y) with the highest q_x[x] + q_y[y].
         Select the dir with the highest q_dir[dir].
 
-        * assuming x is vertical (first index into NumPy arrays), and y is horizontal
+        * assumes x is vertical (first index into NumPy arrays), and y is horizontal
+        * assumes Q_X and Q_Y are both (1, 18) arrays
         """
-        q_xy = np.repeat(q_x[:, None], _MAP_SIZE, axis=1) + np.repeat(q_y[None, :], _MAP_SIZE, axis=0)
+        q_xy = np.repeat(q_x.T, _MAP_SIZE, axis=1) + np.repeat(q_y, _MAP_SIZE, axis=0)
         q_xy_valid = q_xy * np.logical_and(self.map.owner == player_id, self.map.armies > 1)
         act_x, act_y = np.unravel_index(np.argmax(q_xy_valid), q_xy_valid.shape)
         act_dir = np.argmax(q_dir)
