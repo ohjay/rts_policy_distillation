@@ -33,9 +33,9 @@ def train(env, config):
 
     lr_multiplier = 10.0
     lr_schedule = PiecewiseSchedule([
-        (0,                   1e-3 * lr_multiplier),
-        (num_iterations / 10, 1e-4 * lr_multiplier),
-        (num_iterations / 2,  5e-5 * lr_multiplier),
+        (0,                   5e-4 * lr_multiplier),
+        (num_iterations / 10, 2e-5 * lr_multiplier),
+        (num_iterations / 2,  1e-5 * lr_multiplier),
     ], outside_value=5e-5 * lr_multiplier)
     optimizer = dqn.OptimizerSpec(
         constructor=tf.train.AdamOptimizer, kwargs=dict(epsilon=1e-4), lr_schedule=lr_schedule)
@@ -51,7 +51,7 @@ def train(env, config):
     ], outside_value=0.01)
 
     dqn.learn(env, config, optimizer_spec=optimizer, session=session, exploration=exploration_schedule,
-              stopping_criterion=stopping_criterion, replay_buffer_size=1000000, batch_size=32, gamma=0.99,
+              stopping_criterion=stopping_criterion, replay_buffer_size=1000000, batch_size=64, gamma=0.99,
               learning_starts=50000, learning_freq=1, frame_history_len=1, target_update_freq=10000, grad_norm_clipping=10)
 
     if hasattr(env, 'close'):  # cleanup, if applicable

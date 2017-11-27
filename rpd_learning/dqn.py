@@ -11,7 +11,7 @@ import operator
 import datetime
 import functools, itertools
 import tensorflow as tf
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
@@ -76,7 +76,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         """
         return np.concatenate([obs[input_name].flatten() for input_name in sorted(arch['inputs'].keys())])
 
-    def _np_to_obs(obs_np):
+    def _np_to_obs(obs_np, batched=False):
         """Separates observation into individual inputs (the {input_name: value} dict it was originally).
         This the inverse of `_obs_to_np`.
         """
@@ -85,7 +85,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         for input_name in sorted(arch['inputs'].keys()):
             shape = arch['inputs'][input_name]['shape']
             size = functools.reduce(operator.mul, shape, 1)
-            if obs_np.shape[0] == batch_size:
+            if batched or obs_np.shape[0] == batch_size:
                 shape = np.insert(shape, 0, obs_np.shape[0])
                 obs[input_name] = np.reshape(obs_np[:, i:i+size], shape)
             else:
@@ -161,6 +161,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     ###########
 
     model_initialized = False
+    obs_mean, obs_std = {}, {}
     num_param_updates = 0
     player_output, _ = env.reset(map_init='empty')
     state, reward, done = player_output
@@ -193,6 +194,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
             feed_dict = {}
             for input_name in obs_recent.keys():
+                obs_recent[input_name] = (obs_recent[input_name] - obs_mean[input_name]) / obs_std[input_name]
                 shaped_val = np.reshape(obs_recent[input_name], (1,) + obs_recent[input_name].shape)
                 feed_dict[obs_t_ph[input_name]] = shaped_val
 
@@ -241,8 +243,16 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             obs_batch_np, act_batch, rew_batch, next_obs_batch_np, done_mask = replay_buffer.sample(batch_size)
             obs_batch = _np_to_obs(obs_batch_np)
             next_obs_batch = _np_to_obs(next_obs_batch_np)
+
             # Initialize the model
             if not model_initialized:
+                # Compute observation mean and standard deviation (for use in normalization)
+                _obs_np, _, _, _, _ = replay_buffer.sample(replay_buffer.num_in_buffer - 1)
+                _obs = _np_to_obs(_obs_np, batched=True)
+                obs_mean = {input_name: np.mean(_obs[input_name], axis=0)}
+                obs_std = {input_name: np.std(_obs[input_name], axis=0)}
+                _obs_np, _obs = None, None
+
                 initialize_interdependent_variables(session, tf.global_variables(), merge_dicts(
                     {obs_t_ph[input_name]: obs_batch[input_name] for input_name in obs_batch.keys()},
                     {obs_tp1_ph[input_name]: next_obs_batch[input_name] for input_name in next_obs_batch.keys()}
@@ -251,8 +261,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
             # Train the model
             session.run(train_fn, merge_dicts(
-                {obs_t_ph[input_name]: obs_batch[input_name] for input_name in obs_batch.keys()},
-                {obs_tp1_ph[input_name]: next_obs_batch[input_name] for input_name in next_obs_batch.keys()},
+                {obs_t_ph[_name]: (obs_batch[_name] - obs_mean[_name]) / obs_std[_name] for _name in obs_batch.keys()},
+                {obs_tp1_ph[_name]: (next_obs_batch[_name] - obs_mean[_name]) / obs_std[_name] for _name in next_obs_batch.keys()},
                 {act_t_ph[output_name]: act_batch[:, i] for i, output_name in enumerate(output_names)},
                 {rew_t_ph: rew_batch, done_mask_ph: done_mask, learning_rate: optimizer_spec.lr_schedule.value(t)}
             ))
