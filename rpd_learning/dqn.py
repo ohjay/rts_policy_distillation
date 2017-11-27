@@ -185,12 +185,13 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
         # 2. Step the env and store the transition in the replay buffer
         idx = replay_buffer.store_frame(last_obs_np)
+
+        # Choose action via epsilon greedy exploration
         eps = exploration.value(t)
         if not model_initialized or random() < eps:
             # If first step, choose a random action
             action = env.get_random_semi_valid_action(1)
         else:
-            # Choose action via epsilon greedy exploration (TODO no more epsilon greedy exploration?)
             obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
             feed_dict = {}
             for input_name in obs_recent.keys():
@@ -200,8 +201,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
             fetches = [q_func.outputs[output_name] for output_name in output_names]
             q_values = session.run(fetches, feed_dict=feed_dict)
-            act_x, act_y, act_dir = env.get_valid_action_from_q_values(q_values)
-            action = np.array((act_x, act_y, act_dir))
+            action = env.get_valid_action_from_q_values(q_values)
 
         player_output, _ = env.step(action)
         last_obs, reward, done = player_output
@@ -250,7 +250,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 _obs_np, _, _, _, _ = replay_buffer.sample(replay_buffer.num_in_buffer - 1)
                 _obs = _np_to_obs(_obs_np, batched=True)
                 obs_mean = {input_name: np.mean(_obs[input_name], axis=0) for input_name in _obs.keys()}
-                obs_std = {input_name: np.std(_obs[input_name], axis=0) for input_name in _obs.keys()}
+                obs_std = {input_name: np.std(_obs[input_name], axis=0) + 1e-9 for input_name in _obs.keys()}
                 _obs_np, _obs = None, None
 
                 initialize_interdependent_variables(session, tf.global_variables(), merge_dicts(

@@ -346,7 +346,7 @@ class GeneralsEnv:
             act_dir = np.argmax(q_dir)
         else:
             raise NotImplementedError('action space not supported')
-        return act_x, act_y, act_dir
+        return np.array((act_x, act_y, act_dir))
 
     def _flat_to_2d(self, index):
         return index // _MAP_SIZE, index % _MAP_SIZE
