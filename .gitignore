@@ -2,3 +2,7 @@
 .idea/
 *.pyc
 replays_prod/
+img/
+*.ttf
+q_func/
+target/

@@ -6,11 +6,11 @@ dqn.py
 Deep Q-network as described by CS 294-112 (goo.gl/MhA4eA).
 """
 
-import sys
+import os, sys
 import operator
+import datetime
 import functools, itertools
 import tensorflow as tf
-import numpy as np
 from collections import namedtuple
 
 from rpd_learning.dqn_utils import *
@@ -20,6 +20,7 @@ from random import random
 
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
 
+_LAUNCH_TIME = datetime.datetime.now()
 _NO_OP = 4
 
 def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(1000000, 0.1), stopping_criterion=None,
@@ -170,7 +171,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     num_param_updates = 0
     mean_episode_reward = -float('nan')
     best_mean_episode_reward = -float('inf')
-    player_output, _ = env.reset()
+    player_output, _ = env.reset(map_init='empty')
     state, reward, done = player_output
     last_obs_np = _obs_to_np(state)
     log_freq = 150
@@ -211,10 +212,14 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         last_obs, reward, done = player_output
         replay_buffer.store_effect(idx, action, reward, done)
         if save_images and len(last_obs):
-            env.get_image_of_state(last_obs).save("img/Game_{}_Step_{}.png".format(play_count, game_steps))
+            run_dir = os.path.join('img', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
+            if not os.path.exists(run_dir):
+                os.makedirs(run_dir)
+                print('Created directory at %s.' % run_dir)
+            env.get_image_of_state(last_obs).save("{}/Game_{}_Step_{}.png".format(run_dir, play_count, game_steps))
 
         if done:
-            player_output, _ = env.reset()
+            player_output, _ = env.reset(map_init='empty')
             last_obs, reward, done = player_output
             last_obs_np = _obs_to_np(last_obs)
 
@@ -280,6 +285,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             sys.stdout.flush()
 
             # Save network parameters
-            # q_func.save(session, t, outfolder='q_func')
-            # target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
+            q_func.save(session, t, outfolder='q_func')
+            target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
             save_images = True

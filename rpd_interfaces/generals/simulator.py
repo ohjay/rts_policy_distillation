@@ -27,6 +27,12 @@ def land_dt(player, state, next_state, opponent_land_count):
         return np.count_nonzero(next_state['friendly'])
     return np.count_nonzero(next_state['friendly']) - np.count_nonzero(state['friendly'])
 
+def scaled_land_dt(player, state, next_state, opponent_land_count):
+    ns_friendly = np.count_nonzero(next_state['friendly'])
+    if state is None:
+        return ns_friendly
+    return (ns_friendly - np.count_nonzero(state['friendly'])) * ns_friendly
+
 def win_loss(player, state, next_state, opponent_land_count):
     if not opponent_land_count:
         return 1
@@ -34,7 +40,7 @@ def win_loss(player, state, next_state, opponent_land_count):
         return 0
 
 class Player(object):
-    def __init__(self, id_no, general_loc, reward_fn=land_dt):
+    def __init__(self, id_no, general_loc, reward_fn=scaled_land_dt):
         self.id_no = id_no
         self.actions = queue.Queue()
         self.outputs = queue.Queue()
@@ -208,10 +214,16 @@ class GeneralsEnv:
     def __init__(self, root_dir):
         listdir = os.listdir(root_dir)
         self.replays = [root_dir + file for file in listdir if file.endswith('.gioreplay')]
+        self.map = None
 
-    def reset(self):
+    def reset(self, map_init='random'):
         """Sets the map using a random replay"""
-        self.map = self._get_random_map()
+        if map_init.lower() == 'empty':
+            self.map = self._get_random_map(include_mountains=False, include_cities=False)
+        elif map_init.lower() == 'random':
+            self.map = self._get_random_map()
+        else:
+            raise NotImplementedError('map init "%s" not supported' % map_init)
         self.map.update()
         return [x.get_output() for x in self.map.players.values()]
 
@@ -250,17 +262,19 @@ class GeneralsEnv:
         dirs = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0), 4: (0, 0)}
         return initial[0] + dirs[direction][0], initial[1] + dirs[direction][1]
 
-    def _get_random_map(self):
+    def _get_random_map(self, include_mountains=True, include_cities=True):
         while True:
             index = randint(0, len(self.replays) - 1)
             replay = json.load(open(self.replays[index]))
             if len(replay['usernames']) == 2 and replay['mapWidth'] == 18 and replay['mapHeight'] == 18:
                 break
         m = Map()
-        for mountain in replay['mountains']:
-            m.add_mountain(self._flat_to_2d(mountain))
-        for i in range(len(replay['cities'])):
-            m.add_city(self._flat_to_2d(replay['cities'][i]), replay['cityArmies'][i])
+        if include_mountains:
+            for mountain in replay['mountains']:
+                m.add_mountain(self._flat_to_2d(mountain))
+        if include_cities:
+            for i in range(len(replay['cities'])):
+                m.add_city(self._flat_to_2d(replay['cities'][i]), replay['cityArmies'][i])
         for general in replay['generals']:
             m.add_general(self._flat_to_2d(general))
         return m
@@ -304,7 +318,10 @@ class GeneralsEnv:
             (0, 0, 100, 255)        # 8 - Blue player last location - Dark Blue
         ]
         dir = os.path.dirname(__file__)
-        font = ImageFont.truetype(os.path.join(dir, 'FreeMono.ttf'), 40)
+        try:
+            font = ImageFont.truetype(os.path.join(dir, 'FreeMono.ttf'), 40)
+        except IOError as e:
+            print('IOError: failed to open font file at %s.' % os.path.join(dir, 'FreeMono.ttf'))
         for i in range(_MAP_SIZE):
             for j in range(_MAP_SIZE):
                 d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[0])
