@@ -68,10 +68,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     ###############
 
     arch = config['dqn_arch']
-    num_dir = arch['outputs']['direction']['shape'][0]
-    num_x = arch['outputs']['target_x']['shape'][0]
-    num_y = arch['outputs']['target_y']['shape'][0]
-
+    output_names = sorted(arch['outputs'].keys(), key=lambda x: arch['outputs'][x].get('order', float('inf')))
 
     def _obs_to_np(obs):
         """Reformats observation as a single NumPy array.
@@ -107,9 +104,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             obs_t_ph_float[input_name] = obs_t_ph[input_name]
         else:  # casting to float on GPU ensures lower data transfer times
             obs_t_ph_float[input_name] = tf.cast(obs_t_ph[input_name], tf.float32) / 255.0
-    act_t_x_ph = tf.placeholder(tf.int32, [None]) # current action
-    act_t_y_ph = tf.placeholder(tf.int32, [None])
-    act_t_dir_ph = tf.placeholder(tf.int32, [None])  
+    act_t_ph = {}
+    for output_name in output_names:
+        act_t_ph[output_name] = tf.placeholder(tf.int32, [None])  # current action
     rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
     obs_tp1_ph = {input_name: None for input_name in arch['inputs'].keys()}  # next observation (or state)
     obs_tp1_ph_float = {input_name: None for input_name in arch['inputs'].keys()}
@@ -126,30 +123,26 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     # Create networks (for current/next Q-values)
     q_func = Model(arch, inputs=obs_t_ph_float, scope='q_func', reuse=False)  # model to use for computing the q-function
     target_q_func = Model(arch, inputs=obs_tp1_ph_float, scope='target_q_func', reuse=False)
-    
-    q_dir_out = q_func.outputs['direction']
-    q_x_out = q_func.outputs['target_x']
-    q_y_out = q_func.outputs['target_y']
-    target_dir_out = target_q_func.outputs['direction']
-    target_x_out = target_q_func.outputs['target_x']
-    target_y_out = target_q_func.outputs['target_y']
 
     # Compute the Bellman error
-    q_x_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_x_ph, num_x), q_x_out), axis=1)
-    y_x_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_x_out), axis=1))
-    q_y_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_y_ph, num_y), q_y_out), axis=1)
-    y_y_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_y_out), axis=1))
-    q_dir_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_dir_ph, num_dir), q_dir_out), axis=1)
-    y_dir_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_dir_out), axis=1))
+    all_q_j = []
+    all_y_j = []
+    for output_name in output_names:
+        _num = arch['outputs'][output_name]['shape'][0]
+        q_out = q_func.outputs[output_name]
+        target_out = target_q_func.outputs[output_name]
+        all_q_j.append(tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1))
+        all_y_j.append(rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1)))
 
-    total_error = tf.reduce_mean(tf.square(y_x_j - q_x_j)) + \
-                  tf.reduce_mean(tf.square(y_y_j - q_y_j)) + \
-                  tf.reduce_mean(tf.square(y_dir_j - q_dir_j)) # scalar valued tensor representing Bellman error (evaluate the current and next Q-values and construct corresponding error)
+    total_error = 0
+    for q_j, y_j in zip(all_q_j, all_y_j):
+        # scalar valued tensor representing Bellman error (error based on current and next Q-values)
+        total_error += tf.reduce_mean(tf.square(y_j - q_j))
     q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')  # all vars in Q-function network
     target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')  # all vars in target network
 
     # Construct optimization op (with gradient clipping)
-    learning_rate = tf.placeholder(tf.float32, (), name="learning_rate")
+    learning_rate = tf.placeholder(tf.float32, (), name='learning_rate')
     optimizer = optimizer_spec.constructor(learning_rate=learning_rate, **optimizer_spec.kwargs)
     train_fn = minimize_and_clip(optimizer, total_error, var_list=q_func_vars, clip_val=grad_norm_clipping)
 
@@ -169,8 +162,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
     model_initialized = False
     num_param_updates = 0
-    mean_episode_reward = -float('nan')
-    best_mean_episode_reward = -float('inf')
     player_output, _ = env.reset(map_init='empty')
     state, reward, done = player_output
     last_obs_np = _obs_to_np(state)
@@ -198,19 +189,17 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             # If first step, choose a random action
             action = env.get_random_semi_valid_action(1)
         else:
-            # Choose action via epsilon greedy exploration
+            # Choose action via epsilon greedy exploration (TODO no more epsilon greedy exploration?)
             obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
             feed_dict = {}
             for input_name in obs_recent.keys():
                 shaped_val = np.reshape(obs_recent[input_name], (1,) + obs_recent[input_name].shape)
                 feed_dict[obs_t_ph[input_name]] = shaped_val
-            q_x = session.run(q_x_out, feed_dict=feed_dict)
-            q_y = session.run(q_y_out, feed_dict=feed_dict)
-            q_dir = session.run(q_dir_out, feed_dict=feed_dict)
 
-            act_x, act_y, act_dir = env.get_valid_action_from_q_values(q_x, q_y, q_dir)
+            fetches = [q_func.outputs[output_name] for output_name in output_names]
+            q_values = session.run(fetches, feed_dict=feed_dict)
+            act_x, act_y, act_dir = env.get_valid_action_from_q_values(q_values)
             action = np.array((act_x, act_y, act_dir))
-            action = env.get_nearest_valid_action(action)
 
         player_output, _ = env.step(action)
         last_obs, reward, done = player_output
@@ -264,8 +253,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             session.run(train_fn, merge_dicts(
                 {obs_t_ph[input_name]: obs_batch[input_name] for input_name in obs_batch.keys()},
                 {obs_tp1_ph[input_name]: next_obs_batch[input_name] for input_name in next_obs_batch.keys()},
-                {act_t_x_ph: act_batch[:,0], act_t_y_ph: act_batch[:,1], act_t_dir_ph: act_batch[:,2],  
-                 rew_t_ph: rew_batch, done_mask_ph: done_mask, learning_rate: optimizer_spec.lr_schedule.value(t)}
+                {act_t_ph[output_name]: act_batch[:, i] for i, output_name in enumerate(output_names)},
+                {rew_t_ph: rew_batch, done_mask_ph: done_mask, learning_rate: optimizer_spec.lr_schedule.value(t)}
             ))
 
             # Periodically update the target network
@@ -274,25 +263,17 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             num_param_updates += 1
 
         # 4. Log progress
-        # last_episode_rewards = env.reward_history  # TODO separate rewards into episodes
-        # if len(last_episode_rewards) > 0:
-        #     mean_episode_reward = np.mean(last_episode_rewards[-100:])
-        # if len(last_episode_rewards) > 100:
-        #     best_mean_episode_reward = max(best_mean_episode_reward, mean_episode_reward)
         if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
             print('timestep %d' % t)
-            print('---')
+            print('-----')
             print('mean of max episode rewards %.2f' % np.mean(max_episode_rewards))
             print('best max episode reward %.2f' % np.max(max_episode_rewards))
-            print('------')
-            print('mean of past 100 max episode_rewards: %.2f' % np.mean(max_episode_rewards[-100:]))
-            print('best of past 100 max episode rewards %.2f' % np.max(max_episode_rewards[-100:]))
-            print('---------')
+            print('-----')
+            print('mean of max episode rewards (100 episodes) %.2f' % np.mean(max_episode_rewards[-100:]))
+            print('best max episode reward (100 episodes) %.2f' % np.max(max_episode_rewards[-100:]))
+            print('-----')
             print('mean of recent rewards %.2f' % np.mean(last_episode_rewards))
             print('recent rewards %r' % last_episode_rewards)
-            # print("mean reward (100 episodes) %f" % mean_episode_reward)
-            # print("best mean reward %f" % best_mean_episode_reward)
-            # print("episodes %d" % len(last_episode_rewards))
             print('exploration %f' % exploration.value(t))
             print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
             sys.stdout.flush()

@@ -322,18 +322,30 @@ class GeneralsEnv:
         start_location = valid_start[dist.argmin()]
         return start_location[0], start_location[1], action[2]
 
-    def get_valid_action_from_q_values(self, q_x, q_y, q_dir, player_id=1):
+    def get_valid_action_from_q_values(self, q_values, player_id=1):
         """
-        Select the VALID (x, y) with the highest q_x[x] + q_y[y].
-        Select the dir with the highest q_dir[dir].
+        If there is one Q-value - (x, y, dir):
+        - Select the VALID (x, y, dir) with the highest Q value.
 
+        If there are three Q values - x, y, and dir:
+        - Select the VALID (x, y) with the highest q_x[x] + q_y[y].
+        - Select the dir with the highest q_dir[dir].
         * assumes x is vertical (first index into NumPy arrays), and y is horizontal
         * assumes Q_X and Q_Y are both (1, 18) arrays
         """
-        q_xy = np.repeat(q_x.T, _MAP_SIZE, axis=1) + np.repeat(q_y, _MAP_SIZE, axis=0)
-        q_xy_valid = q_xy * np.logical_and(self.map.owner == player_id, self.map.armies > 1)
-        act_x, act_y = np.unravel_index(np.argmax(q_xy_valid), q_xy_valid.shape)
-        act_dir = np.argmax(q_dir)
+        if len(q_values) == 1:
+            q_values = np.reshape(q_values, (_MAP_SIZE, _MAP_SIZE, 4))
+            valid_start = np.logical_and(self.map.owner == player_id, self.map.armies > 1)
+            q_values_valid = q_values * np.repeat(valid_start[:, :, None], 4, axis=2)
+            act_x, act_y, act_dir = np.unravel_index(np.argmax(q_values_valid), q_values_valid.shape)
+        elif len(q_values) == 3:
+            q_x, q_y, q_dir = q_values
+            q_xy = np.repeat(q_x.T, _MAP_SIZE, axis=1) + np.repeat(q_y, _MAP_SIZE, axis=0)
+            q_xy_valid = q_xy * np.logical_and(self.map.owner == player_id, self.map.armies > 1)
+            act_x, act_y = np.unravel_index(np.argmax(q_xy_valid), q_xy_valid.shape)
+            act_dir = np.argmax(q_dir)
+        else:
+            raise NotImplementedError('action space not supported')
         return act_x, act_y, act_dir
 
     def _flat_to_2d(self, index):
