@@ -43,7 +43,7 @@ def win_loss(player, state, next_state, opponent_land_count):
         return 0
 
 class Player(object):
-    def __init__(self, id_no, general_loc, reward_fn=scaled_land_dt):
+    def __init__(self, id_no, general_loc, reward_fn=land_dt):
         self.id_no = id_no
         self.actions = queue.Queue()
         self.outputs = queue.Queue()

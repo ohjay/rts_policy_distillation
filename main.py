@@ -51,7 +51,7 @@ def train(env, config):
     ], outside_value=0.01)
 
     dqn.learn(env, config, optimizer_spec=optimizer, session=session, exploration=exploration_schedule,
-              stopping_criterion=stopping_criterion, replay_buffer_size=1000000, batch_size=64, gamma=0.1,
+              stopping_criterion=stopping_criterion, replay_buffer_size=1000000, batch_size=32, gamma=0.5,
               learning_starts=50000, learning_freq=1, frame_history_len=1, target_update_freq=10000, grad_norm_clipping=10)
 
     if hasattr(env, 'close'):  # cleanup, if applicable
