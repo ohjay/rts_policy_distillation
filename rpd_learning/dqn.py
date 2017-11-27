@@ -177,8 +177,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     play_count = 0
     game_steps = 0
 
-    last_episode_rewards = []
     episode_rewards = []
+    move_valid = []
+    net_or_rand = []
 
     save_images = False
 
@@ -193,6 +194,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         if not model_initialized or random() < eps:
             # If first step, choose a random action
             action = env.get_random_semi_valid_action(1)
+            net_or_rand.append('R')
         else:
             # Choose action via epsilon greedy exploration
             obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
@@ -205,27 +207,46 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             q_dir = session.run(q_dir_out, feed_dict=feed_dict)
 
             act_x, act_y, act_dir = np.argmax(q_x), np.argmax(q_y), np.argmax(q_dir)
+            print(act_x, '\t', act_y, '\t', env.map.armies[act_x, act_y])
             action = np.array((act_x, act_y, act_dir))
+            net_or_rand.append('N')
 
         player_output, _ = env.step(action)
         last_obs, reward, done = player_output
         replay_buffer.store_effect(idx, action, reward, done)
         if save_images and len(last_obs):
             env.get_image_of_state(last_obs).save("img/Game_{}_Step_{}.png".format(play_count, game_steps))
+            episode_rewards.append(reward)
+            move_valid.append(env.action_validity(1))
 
         if done:
             player_output, _ = env.reset()
             last_obs, reward, done = player_output
             last_obs_np = _obs_to_np(last_obs)
 
-            last_episode_rewards = episode_rewards
-            episode_rewards = []
+            if episode_rewards:
+                print('game %d' % play_count)
+                print('mean reward %.2f' % np.mean(episode_rewards))
+                print('recent rewards %r' % list(zip(episode_rewards, move_valid, net_or_rand)))
+                # print('recent rewards %r' % episode_rewards)
+                # print("mean reward (100 episodes) %f" % mean_episode_reward)
+                # print("best mean reward %f" % best_mean_episode_reward)
+                # print("episodes %d" % len(last_episode_rewards))
+                print('exploration %f' % exploration.value(t))
+                print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
+                #print('move_validity %r' % move_valid)
+                #print('random? %r' % net_or_rand)
+                sys.stdout.flush()
+
             save_images = False
             play_count += 1
             game_steps = 0
+            episode_rewards = []
+            move_valid = []
+            net_or_rand = []
+
         else:
             last_obs_np = _obs_to_np(last_obs)
-            episode_rewards.append(reward)
             game_steps += 1
 
         # At this point, the environment should have been advanced one step (and
@@ -269,15 +290,15 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         # if len(last_episode_rewards) > 100:
         #     best_mean_episode_reward = max(best_mean_episode_reward, mean_episode_reward)
         if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
-            print('timestep %d' % t)
-            print('mean reward %.2f' % np.mean(last_episode_rewards))
-            print('recent rewards %r' % last_episode_rewards)
+            # print('game %d' % play_count)
+            # print('mean reward %.2f' % np.mean(last_episode_rewards))
+            # print('recent rewards %r' % last_episode_rewards)
             # print("mean reward (100 episodes) %f" % mean_episode_reward)
             # print("best mean reward %f" % best_mean_episode_reward)
             # print("episodes %d" % len(last_episode_rewards))
-            print('exploration %f' % exploration.value(t))
-            print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
-            sys.stdout.flush()
+            # print('exploration %f' % exploration.value(t))
+            # print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
+            # sys.stdout.flush()
 
             # Save network parameters
             # q_func.save(session, t, outfolder='q_func')
