@@ -11,6 +11,7 @@ operation: train  # (train,)
 train_params:
   random_seed: 0
   num_timesteps: 40000000
+  lr_multiplier: 10.0
   replay_buffer_size: 1000000
   batch_size: 32
   gamma: 0.99
@@ -20,6 +21,7 @@ train_params:
   target_update_freq: 10000
   grad_norm_clipping: 10
   exploration_schedule: [(0, 0.20), (5e5, 0.30), (8e5, 0.10), (1e6, 0.01)]
+  log_freq: 150  # log every X episodes
 
 # MODEL ARCHITECTURE
 # ------------------

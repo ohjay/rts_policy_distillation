@@ -43,7 +43,7 @@ def train(env, config):
 
     # TODO: configure learning rate and exploration somewhere else
 
-    lr_multiplier = 10.0
+    lr_multiplier = train_params.get('lr_multiplier', 10.0)
     lr_schedule = PiecewiseSchedule([
         (0,                   1e-4 * lr_multiplier),
         (num_iterations / 10, 1e-4 * lr_multiplier),

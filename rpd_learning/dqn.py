@@ -165,14 +165,15 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     step_kwargs = config.get('step_kwargs', {})
     last_obs, reward, done = env.reset(**reset_kwargs)
     last_obs_np = _obs_to_np(last_obs)
-    log_freq = 150
+    log_freq = config.get('train_params', {}).get('log_freq', 150)
     play_count = 0
     game_steps = 0
 
     last_episode_rewards = []
     episode_rewards = []
-    mean_episode_rewards = []
-    max_episode_rewards = []
+    episode_returns = []
+    mean_episode_return = -float('nan')
+    best_mean_episode_return = float('-inf')
 
     save_images = False
 
@@ -216,8 +217,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             last_obs_np = _obs_to_np(last_obs)
 
             last_episode_rewards = episode_rewards
-            mean_episode_rewards.append(np.mean(episode_rewards))
-            max_episode_rewards.append(np.max(episode_rewards))
+            episode_returns.append(sum(episode_rewards))
             episode_rewards = []
             save_images = False
             play_count += 1
@@ -268,19 +268,21 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             num_param_updates += 1
 
         # Log progress
+        if len(episode_returns) > 0:
+            mean_episode_return = np.mean(episode_returns[-100:])
+        if len(episode_returns) > 100:
+            best_mean_episode_return = max(best_mean_episode_return, mean_episode_return)
         if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
             print('timestep %d' % t)
             print('-----')
-            print('mean of mean episode rewards %.2f' % np.mean(mean_episode_rewards))
-            print('best mean episode reward %.2f' % np.max(mean_episode_rewards))
-            print('-----')
-            print('mean of mean episode rewards (100 episodes) %.2f' % np.mean(mean_episode_rewards[-100:]))
-            print('best mean episode reward (100 episodes) %.2f' % np.max(mean_episode_rewards[-100:]))
+            print('mean return (100 episodes) %f' % mean_episode_return)
+            print('best mean return (100 episodes) %f' % best_mean_episode_return)
+            print('episodes %d' % len(episode_returns))
+            print('exploration %f' % exploration.value(t))
+            print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
             print('-----')
             print('mean of recent rewards %.2f' % np.mean(last_episode_rewards))
             print('recent rewards %r' % last_episode_rewards)
-            print('exploration %f' % exploration.value(t))
-            print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
             sys.stdout.flush()
 
             # Save network parameters and images from next episode
