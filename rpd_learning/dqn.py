@@ -75,12 +75,14 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     arch = config['dqn_arch']
     output_names = sorted(arch['outputs'].keys(), key=lambda x: arch['outputs'][x].get('order', float('inf')))
 
+    # TODO: inspect this
     def _obs_to_np(obs):
         """Reformats observation as a single NumPy array.
         An observation, at least from the RPD interface, will be given as an {input_name: value} dict.
         """
         return np.concatenate([obs[input_name].flatten() for input_name in sorted(arch['inputs'].keys())])
 
+    # TODO: inspect this
     def _np_to_obs(obs_np, batched=False):
         """Separates observation into individual inputs (the {input_name: value} dict it was originally).
         This the inverse of `_obs_to_np`.
@@ -92,7 +94,13 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             size = functools.reduce(operator.mul, shape, 1)
             if batched or obs_np.shape[0] == batch_size:
                 shape = np.insert(shape, 0, obs_np.shape[0])
-                obs[input_name] = np.reshape(obs_np[:, i:i+size], shape)
+                try:
+                    obs[input_name] = np.reshape(obs_np[:, i:i+size], shape)
+                except ValueError as e:
+                    print('i: %d' % i)
+                    print('obs_np shape: %r' % (obs_np.shape,))
+                    print('shape, size: %r, %d' % (shape, size))
+                    raise
             else:
                 obs[input_name] = np.reshape(obs_np[i:i+size], shape)
             i += size

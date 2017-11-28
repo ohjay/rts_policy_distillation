@@ -177,7 +177,7 @@ class ReplayBuffer(object):
 
         return obs_batch, act_batch, rew_batch, next_obs_batch, done_mask
 
-
+    # TODO: inspect dimensions and dtypes
     def sample(self, batch_size):
         """Sample `batch_size` different transitions.
 
@@ -221,48 +221,38 @@ class ReplayBuffer(object):
         Returns
         -------
         observation: np.array
-            Array of shape (img_h, img_w, img_c * frame_history_len)
-            and dtype np.uint8, where observation[:, :, i*img_c:(i+1)*img_c]
-            encodes frame at time `t - frame_history_len + i`
+            The last `frame_history_len` frames as a single array,
+            where the frames are concatenated over the final axis.
         """
         assert self.num_in_buffer > 0
         return self._encode_observation((self.next_idx - 1) % self.size)
 
+    # TODO: inspect this
     def _encode_observation(self, idx):
-        end_idx   = idx + 1 # make noninclusive
+        end_idx = idx + 1  # make noninclusive
         start_idx = end_idx - self.frame_history_len
-        # this checks if we are using low-dimensional observations, such as RAM
-        # state, in which case we just directly return the latest RAM.
-        if len(self.obs.shape) == 2:
-            return self.obs[end_idx-1]
-        # if there weren't enough frames ever in the buffer for context
+
+        # If there aren't enough frames in the buffer for context
         if start_idx < 0 and self.num_in_buffer != self.size:
             start_idx = 0
         for idx in range(start_idx, end_idx - 1):
             if self.done[idx % self.size]:
                 start_idx = idx + 1
         missing_context = self.frame_history_len - (end_idx - start_idx)
-        # if zero padding is needed for missing context
-        # or we are on the boundary of the buffer
-        if start_idx < 0 or missing_context > 0:
-            frames = [np.zeros_like(self.obs[0]) for _ in range(missing_context)]
-            for idx in range(start_idx, end_idx):
-                frames.append(self.obs[idx % self.size])
-            return np.concatenate(frames, 2)
-        else:
-            # this optimization has potential to saves about 30% compute time \o/
-            img_h, img_w = self.obs.shape[1], self.obs.shape[2]
-            return self.obs[start_idx:end_idx].transpose(1, 2, 0, 3).reshape(img_h, img_w, -1)
+
+        frames = [np.zeros_like(self.obs[0]) for _ in range(missing_context)]
+        for idx in range(start_idx, end_idx):
+            frames.append(self.obs[idx % self.size])
+        return np.concatenate(frames, axis=-1)
 
     def store_frame(self, frame):
-        """Store a single frame in the buffer at the next available index, overwriting
-        old frames if necessary.
+        """Store a single frame in the buffer at the next available index,
+        overwriting old frames if necessary.
 
         Parameters
         ----------
         frame: np.array
-            Array of shape (img_h, img_w, img_c) and dtype np.uint8
-            the frame to be stored
+            The frame to be stored; assumed to be of dtype np.uint8
 
         Returns
         -------
@@ -281,10 +271,9 @@ class ReplayBuffer(object):
         return ret
 
     def store_effect(self, idx, action, reward, done):
-        """Store effects of action taken after observing frame stored
-        at index idx. The reason `store_frame` and `store_effect` is broken
-        up into two functions is so that once can call `encode_recent_observation`
-        in between.
+        """Store effects of action taken after observing frame stored at index idx.
+        The reason `store_frame` and `store_effect` are broken up into two functions
+        is so that one can call `encode_recent_observation` in between.
 
         Parameters
         ---------
