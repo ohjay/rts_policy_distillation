@@ -6,19 +6,20 @@ dqn.py
 Deep Q-network as described by CS 294-112 (goo.gl/MhA4eA).
 """
 
-import sys
+import os, sys
 import operator
+import datetime
 import functools, itertools
 import tensorflow as tf
-import numpy as np
 from collections import namedtuple
 
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
+import random
+
 
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
-
-_NO_OP = 4
+_LAUNCH_TIME = datetime.datetime.now()
 
 def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(1000000, 0.1), stopping_criterion=None,
           replay_buffer_size=1000000, batch_size=32, gamma=0.99, learning_starts=50000, learning_freq=4,
@@ -37,7 +38,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         Specifying the constructor and kwargs, as well as learning rate schedule for the optimizer.
     session: tf.Session
         TensorFlow session to use.
-    exploration: dqn_utils.Schedule
+    exploration: rpd_learning.dqn_utils.Schedule
         Schedule for probability of choosing random action.
     stopping_criterion: (env, t) -> bool
         Should return true when it's okay for the RL algorithm to stop.
@@ -65,7 +66,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     ###############
 
     arch = config['dqn_arch']
-    num_actions = arch['outputs']['action']['shape'][0]
+    output_names = sorted(arch['outputs'].keys(), key=lambda x: arch['outputs'][x].get('order', float('inf')))
 
     def _obs_to_np(obs):
         """Reformats observation as a single NumPy array.
@@ -73,7 +74,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         """
         return np.concatenate([obs[input_name].flatten() for input_name in sorted(arch['inputs'].keys())])
 
-    def _np_to_obs(obs_np):
+    def _np_to_obs(obs_np, batched=False):
         """Separates observation into individual inputs (the {input_name: value} dict it was originally).
         This the inverse of `_obs_to_np`.
         """
@@ -82,7 +83,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         for input_name in sorted(arch['inputs'].keys()):
             shape = arch['inputs'][input_name]['shape']
             size = functools.reduce(operator.mul, shape, 1)
-            if obs_np.shape[0] == batch_size:
+            if batched or obs_np.shape[0] == batch_size:
                 shape = np.insert(shape, 0, obs_np.shape[0])
                 obs[input_name] = np.reshape(obs_np[:, i:i+size], shape)
             else:
@@ -101,7 +102,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             obs_t_ph_float[input_name] = obs_t_ph[input_name]
         else:  # casting to float on GPU ensures lower data transfer times
             obs_t_ph_float[input_name] = tf.cast(obs_t_ph[input_name], tf.float32) / 255.0
-    act_t_ph = tf.placeholder(tf.int32, [None])  # current action
+    act_t_ph = {}
+    for output_name in output_names:
+        act_t_ph[output_name] = tf.placeholder(tf.int32, [None])  # current action
     rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
     obs_tp1_ph = {input_name: None for input_name in arch['inputs'].keys()}  # next observation (or state)
     obs_tp1_ph_float = {input_name: None for input_name in arch['inputs'].keys()}
@@ -118,21 +121,26 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     # Create networks (for current/next Q-values)
     q_func = Model(arch, inputs=obs_t_ph_float, scope='q_func', reuse=False)  # model to use for computing the q-function
     target_q_func = Model(arch, inputs=obs_tp1_ph_float, scope='target_q_func', reuse=False)
-    
-    q_func_out = q_func.outputs['action']
-    # q_x_out = q_func.outputs['target_x']
-    # q_y_out = q_func.outputs['target_y']
-    target_out = target_q_func.outputs['action']
 
     # Compute the Bellman error
-    q_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph, num_actions), q_func_out), axis=1)
-    y_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1))
-    total_error = tf.reduce_mean(tf.square(y_j - q_j))  # scalar valued tensor representing Bellman error (evaluate the current and next Q-values and construct corresponding error)
+    all_q_j = []
+    all_y_j = []
+    for output_name in output_names:
+        _num = arch['outputs'][output_name]['shape'][0]
+        q_out = q_func.outputs[output_name]
+        target_out = target_q_func.outputs[output_name]
+        all_q_j.append(tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1))  # TODO: encoded correctly via `tf.one_hot`?
+        all_y_j.append(rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1)))
+
+    total_error = 0
+    for q_j, y_j in zip(all_q_j, all_y_j):
+        # scalar valued tensor representing Bellman error (error based on current and next Q-values)
+        total_error += tf.reduce_mean(tf.square(y_j - q_j))
     q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')  # all vars in Q-function network
     target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')  # all vars in target network
 
     # Construct optimization op (with gradient clipping)
-    learning_rate = tf.placeholder(tf.float32, (), name="learning_rate")
+    learning_rate = tf.placeholder(tf.float32, (), name='learning_rate')
     optimizer = optimizer_spec.constructor(learning_rate=learning_rate, **optimizer_spec.kwargs)
     train_fn = minimize_and_clip(optimizer, total_error, var_list=q_func_vars, clip_val=grad_norm_clipping)
 
@@ -151,57 +159,65 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     ###########
 
     model_initialized = False
+    obs_mean, obs_std = {}, {}
     num_param_updates = 0
-    mean_episode_reward = -float('nan')
-    best_mean_episode_reward = -float('inf')
-    player_output, _ = env.reset()
-    state, reward, done = player_output
-    last_obs_np = _obs_to_np(state)
-    log_freq = 300
+    reset_kwargs = config.get('reset_kwargs', {})
+    step_kwargs = config.get('step_kwargs', {})
+    last_obs, reward, done = env.reset(**reset_kwargs)
+    last_obs_np = _obs_to_np(last_obs)
+    log_freq = 150
     play_count = 0
     game_steps = 0
 
     last_episode_rewards = []
     episode_rewards = []
+    mean_episode_rewards = []
+    max_episode_rewards = []
 
     save_images = False
 
     for t in itertools.count():
-        # 1. Check stopping criterion
         if stopping_criterion is not None and stopping_criterion(env, t):
             break
 
-        # 2. Step the env and store the transition in the replay buffer
+        # Step the env and store the transition in the replay buffer
         idx = replay_buffer.store_frame(last_obs_np)
-        if not model_initialized:
-            # If first step, choose a random action
-            action = env.get_random_action()
-        else:
-            # Choose action via epsilon greedy exploration
-            eps = exploration.value(t)
-            obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
 
+        # Choose action via epsilon greedy exploration
+        eps = exploration.value(t)
+        if not model_initialized or random.random() < eps:
+            # If first step, choose a random action
+            action = env.get_random_action(semi_valid=True, player_id=1)
+        else:
+            obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
             feed_dict = {}
             for input_name in obs_recent.keys():
+                obs_recent[input_name] = (obs_recent[input_name] - obs_mean[input_name]) / obs_std[input_name]
                 shaped_val = np.reshape(obs_recent[input_name], (1,) + obs_recent[input_name].shape)
                 feed_dict[obs_t_ph[input_name]] = shaped_val
-            q_values = session.run(q_func_out, feed_dict=feed_dict)
-            probabilities = np.full(num_actions, float(eps) / (num_actions - 1))
-            probabilities[np.argmax(q_values)] = 1.0 - eps
-            action = np.random.choice(num_actions, p=probabilities)
 
-        player_output, _ = env.step_simple(action)
-        last_obs, reward, done = player_output
+            fetches = [q_func.outputs[output_name] for output_name in output_names]
+            q_values = session.run(fetches, feed_dict=feed_dict)
+            action = env.get_valid_action_from_q_values(q_values)
+
+        last_obs, reward, done = env.step(action, **step_kwargs)
         replay_buffer.store_effect(idx, action, reward, done)
         if save_images and len(last_obs):
-            env.get_image_of_state(last_obs).save("img/Game_{}_Step_{}.png".format(play_count, game_steps))
+            image = env.get_image_of_state(last_obs)
+            if image is not None:
+                run_dir = os.path.join('img', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
+                if not os.path.exists(run_dir):
+                    os.makedirs(run_dir)
+                    print('Created directory at %s.' % run_dir)
+                image.save("{}/Game_{}_Step_{}.png".format(run_dir, play_count, game_steps))
 
         if done:
-            player_output, _ = env.reset()
-            last_obs, reward, done = player_output
+            last_obs, reward, done = env.reset(**reset_kwargs)
             last_obs_np = _obs_to_np(last_obs)
 
             last_episode_rewards = episode_rewards
+            mean_episode_rewards.append(np.mean(episode_rewards))
+            max_episode_rewards.append(np.max(episode_rewards))
             episode_rewards = []
             save_images = False
             play_count += 1
@@ -211,21 +227,27 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             episode_rewards.append(reward)
             game_steps += 1
 
-        # At this point, the environment should have been advanced one step (and
-        # reset if done was true), last_obs_np should point to the new latest observation,
+        # At this point, the environment should have been advanced one step (and reset if `done` was true),
+        # `last_obs_np` should point to the new latest observation,
         # and the replay buffer should contain one more transition.
 
-        # 3. Perform experience replay and train the network.
-        # note that this is only done if the replay buffer contains enough samples
-        # for us to learn something useful -- until then, the model will not be
-        # initialized and random actions should be taken
+        # Perform experience replay and train the network
+        # (once the replay buffer contains enough samples for us to learn something useful)
         if t > learning_starts and t % learning_freq == 0 and replay_buffer.can_sample(batch_size):
             # Use replay buffer to sample a batch of transitions
             obs_batch_np, act_batch, rew_batch, next_obs_batch_np, done_mask = replay_buffer.sample(batch_size)
             obs_batch = _np_to_obs(obs_batch_np)
             next_obs_batch = _np_to_obs(next_obs_batch_np)
+
             # Initialize the model
             if not model_initialized:
+                # Compute observation mean and standard deviation (for use in normalization)
+                _obs_np, _, _, _, _ = replay_buffer.sample(replay_buffer.num_in_buffer - 1)
+                _obs = _np_to_obs(_obs_np, batched=True)
+                obs_mean = {input_name: np.mean(_obs[input_name], axis=0) for input_name in _obs.keys()}
+                obs_std = {input_name: np.std(_obs[input_name], axis=0) + 1e-9 for input_name in _obs.keys()}
+                _obs_np, _obs = None, None
+
                 initialize_interdependent_variables(session, tf.global_variables(), merge_dicts(
                     {obs_t_ph[input_name]: obs_batch[input_name] for input_name in obs_batch.keys()},
                     {obs_tp1_ph[input_name]: next_obs_batch[input_name] for input_name in next_obs_batch.keys()}
@@ -234,9 +256,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
             # Train the model
             session.run(train_fn, merge_dicts(
-                {obs_t_ph[input_name]: obs_batch[input_name] for input_name in obs_batch.keys()},
-                {obs_tp1_ph[input_name]: next_obs_batch[input_name] for input_name in next_obs_batch.keys()},
-                {act_t_ph: act_batch, rew_t_ph: rew_batch, done_mask_ph: done_mask, learning_rate: optimizer_spec.lr_schedule.value(t)}
+                {obs_t_ph[_name]: (obs_batch[_name] - obs_mean[_name]) / obs_std[_name] for _name in obs_batch.keys()},
+                {obs_tp1_ph[_name]: (next_obs_batch[_name] - obs_mean[_name]) / obs_std[_name] for _name in next_obs_batch.keys()},
+                {act_t_ph[output_name]: act_batch[:, i] for i, output_name in enumerate(output_names)},
+                {rew_t_ph: rew_batch, done_mask_ph: done_mask, learning_rate: optimizer_spec.lr_schedule.value(t)}
             ))
 
             # Periodically update the target network
@@ -244,24 +267,23 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 session.run(update_target_fn)
             num_param_updates += 1
 
-        # 4. Log progress
-        # last_episode_rewards = env.reward_history  # TODO separate rewards into episodes
-        # if len(last_episode_rewards) > 0:
-        #     mean_episode_reward = np.mean(last_episode_rewards[-100:])
-        # if len(last_episode_rewards) > 100:
-        #     best_mean_episode_reward = max(best_mean_episode_reward, mean_episode_reward)
+        # Log progress
         if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
             print('timestep %d' % t)
-            print('mean reward %.2f' % np.mean(last_episode_rewards))
-            print('recent rewards %r' % last_episode_rewards[-5:])
-            # print("mean reward (100 episodes) %f" % mean_episode_reward)
-            # print("best mean reward %f" % best_mean_episode_reward)
-            # print("episodes %d" % len(last_episode_rewards))
+            print('-----')
+            print('mean of mean episode rewards %.2f' % np.mean(mean_episode_rewards))
+            print('best mean episode reward %.2f' % np.max(mean_episode_rewards))
+            print('-----')
+            print('mean of mean episode rewards (100 episodes) %.2f' % np.mean(mean_episode_rewards[-100:]))
+            print('best mean episode reward (100 episodes) %.2f' % np.max(mean_episode_rewards[-100:]))
+            print('-----')
+            print('mean of recent rewards %.2f' % np.mean(last_episode_rewards))
+            print('recent rewards %r' % last_episode_rewards)
             print('exploration %f' % exploration.value(t))
             print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
             sys.stdout.flush()
 
-            # Save network parameters
-            # q_func.save(session, t, outfolder='q_func')
-            # target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
+            # Save network parameters and images from next episode
+            q_func.save(session, t, outfolder='q_func')
+            target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
             save_images = True

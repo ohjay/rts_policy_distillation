@@ -7,131 +7,211 @@ Interface for the simulated version of generals.io.
 This version is local and doesn't require any networking.
 """
 
-import copy
-import collections
-import numpy as np
 from random import randint
-import rpd_interfaces.generals.simulator as sim
+import json
+import os
+from PIL import Image, ImageDraw, ImageFont
+
+from rpd_interfaces.generals.simulator import *
 from rpd_interfaces.interfaces import Environment
-from rpd_interfaces.generals.reward import rew_total_land_dt
 
-# Terrain constants
-# -----------------
-TILE_EMPTY = -1
-TILE_MOUNTAIN = -2
-TILE_FOG = -3
-TILE_FOG_OBSTACLE = -4  # cities and mountains show up as obstacles in the fog of war
-TILE_CITY = -5
-
-# Action constants
-# ----------------
-ACTION_UP = 0
-ACTION_DOWN = 1
-ACTION_LEFT = 2
-ACTION_RIGHT = 3
-ACTION_NOOP = 4
-ACTION_UP_50 = 5
-ACTION_DOWN_50 = 6
-ACTION_LEFT_50 = 7
-ACTION_RIGHT_50 = 8
-
-# General constants
-# -----------------
-_INVALID = 9
-
-_INVALID_OBS = {
-    'terrain': np.full((30, 30, 1), _INVALID, np.uint8),
-    'ownership': np.full((30, 30, 1), _INVALID, np.uint8),
-    'armies': np.full((30, 30, 1), _INVALID, np.uint8),
-}
-
-class GeneralsSim(Environment):
-    def __init__(self, map_shape, map_player_count, reward_func=rew_total_land_dt, reward_history_cap=1000):
-        # Game data
-        self.height, self.width = map_shape
-        self.player_count = map_player_count
+class GeneralsEnv(Environment):
+    def __init__(self, root_dir):
+        listdir = os.listdir(root_dir)
+        self.replays = [root_dir + file for file in listdir if file.endswith('.gioreplay')]
         self.map = None
 
-        self.player_id = -1
-        self.active_sq = None
-
-        # Learning-related info
-        self.prev_observation = None
-        self.reward_func = reward_func
-        self.reward_history = collections.deque(maxlen=reward_history_cap)
-
-    def reset(self):
-        """Reset game and return the first observation."""
-        self.map = sim.Map((self.height, self.width), self.player_count)
-        self.player_id = 1  # TODO: choose player ID for specific DQN? self-play?
-        self.active_sq = self.map.players[self.player_id].general_loc
-        obs = self.map.generate_state(self.map.players[self.player_id])
-        return self._reformat_observation(obs)
-
-    def _parse_action(self, action):
-        """Obtains the (start_loc, end_loc) encoded by ACTION."""
-        end_loc = copy.copy(self.active_sq)
-        if action in (ACTION_UP, ACTION_UP_50):
-            end_loc[0] -= 1
-        elif action in (ACTION_DOWN, ACTION_DOWN_50):
-            end_loc[0] += 1
-        elif action == (ACTION_LEFT, ACTION_LEFT_50):
-            end_loc[1] -= 1
-        elif action == (ACTION_RIGHT, ACTION_RIGHT_50):
-            end_loc[1] += 1
+    def reset(self, map_init='random', player_id=1):
+        """Sets the map using a random replay"""
+        if map_init.lower() == 'empty':
+            self.map = self._get_random_map(include_mountains=False, include_cities=False)
+        elif map_init.lower() == 'random':
+            self.map = self._get_random_map()
         else:
-            end_loc = None
+            raise NotImplementedError('map init "%s" not supported' % map_init)
+        self.map.update()
+        return self.map.players[player_id].get_output()
 
-        is_half = action in (ACTION_UP_50, ACTION_DOWN_50, ACTION_LEFT_50, ACTION_RIGHT_50)
-        return self.active_sq, end_loc, is_half
-
-    def get_random_action(self):
-        """Get a random move."""
-        return randint(0, 4)
-
-    def apply_action(self, action):
-        """Actions are formatted as integers from 0-4 representing the choice of move (up, down, left, right, noop).
-        If the action is invalid, nothing will be done.
-
-        Returns an (observation, reward, done) tuple that represents the result of taking the action.
+    def step(self, action1, action2=None, player_id=1):
+        """Takes two tuples of (x, y, dir).
+        Action 1 is for player 1, 2 is for player 2
+        Returns: (state1, reward1, dead1), (state2, reward2, dead2)
         """
-        start_loc, end_loc, is_half = self._parse_action(action)
-        next_obs, _, done = self.map.action(self.player_id, start_loc, end_loc, is_half)  # our simulator handles noops
-        next_obs = self._reformat_observation(next_obs)
+        start_loc1 = (action1[0], action1[1])
+        self.map.action(1, start_loc1, self._get_movement_for_action(start_loc1, action1[2]))
+        if action2:
+            start_loc2 = (action2[0], action2[1])
+            self.map.action(2, start_loc2, self._get_movement_for_action(start_loc2, action2[2]))
+        self.map.update()
+        out1 = self.map.players[1].get_output()
+        out2 = None
+        if action2:
+            out2 = self.map.players[2].get_output()
+        return out1 if player_id == 1 else out2
 
-        obs, self.prev_observation = self.prev_observation, next_obs
-        reward = self.reward_func(obs, action, next_obs, self)
-        self.reward_history.append(reward)
+    def step_simple(self, action1, action2=None, player_id=1):
+        """Takes two directions, and moves each agent in the corresponding direction"""
+        self.map.action_simple(1, self._get_movement_for_action((0, 0), action1))
+        if action2:
+            self.map.action_simple(2, self._get_movement_for_action((0, 0), action2))
+        self.map.update()
+        out1 = self.map.players[1].get_output()
+        out2 = None
+        if action2:
+            out2 = self.map.players[2].get_output()
+        return out1 if player_id == 1 else out2
 
-        return next_obs, reward, done
+    def _get_movement_for_action(self, initial, direction):
+        """Maps 0, 1, 2, 3, 4 to up, down, left, right, stay"""
+        dirs = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0), 4: (0, 0)}
+        return initial[0] + dirs[direction][0], initial[1] + dirs[direction][1]
 
-    @staticmethod
-    def _pad2d(arr, val, des_shape):
-        """Pad a 2D array with VAL s.t. its final dimensions are (DES_SHAPE[0], DES_SHAPE[1])."""
-        final = np.full(des_shape, val)
-        final[:arr.shape[0], :arr.shape[1]] = arr
-        return final
+    def _get_random_map(self, include_mountains=True, include_cities=True):
+        while True:
+            index = randint(0, len(self.replays) - 1)
+            replay = json.load(open(self.replays[index]))
+            if len(replay['usernames']) == 2 and replay['mapWidth'] == 18 and replay['mapHeight'] == 18:
+                break
+        m = Map()
+        if include_mountains:
+            for mountain in replay['mountains']:
+                m.add_mountain(self._flat_to_2d(mountain))
+        if include_cities:
+            for i in range(len(replay['cities'])):
+                m.add_city(self._flat_to_2d(replay['cities'][i]), replay['cityArmies'][i])
+        for general in replay['generals']:
+            m.add_general(self._flat_to_2d(general))
+        return m
 
-    def _reformat_observation(self, obs):
-        """Reformats a map-generated observation [a (terrain, armies, ownership) tuple]
-        as a dictionary of NumPy arrays with the following keys and values:
-
-        - 'terrain' [shape (30, 30, 1)]: the terrain map
-        - 'ownership' [shape (30, 30, 1)]: the ownership map
-        - 'armies' [shape (30, 30, 1)]: the army map
-        - 'other' [shape 34]:
-          - index 0: width of the map
-          - index 1: turn number
-          - indices 2-9: general positions (-1 indicates "unknown")
-          - indices 10-33: (# tiles, # units, 0 if dead else 1) for each player, ordered by index
+    def get_random_action(self, **kwargs):
+        """Get a random move.
+        If a "semi valid" move is desired, call `get_random_action` as
+        `get_random_action(semi_valid=True, player_id=X)`.
         """
-        observation = {
-            'terrain': self._pad2d(obs[0], _INVALID, (30, 30))[:, :, None],
-            'armies': self._pad2d(obs[1], _INVALID, (30, 30))[:, :, None],
-            'ownership': self._pad2d(obs[2], _INVALID, (30, 30))[:, :, None]
-        }
+        if kwargs.get('semi_valid', False) and 'player_id' in kwargs:
+            return self.get_random_semi_valid_action(**{'player_id': kwargs['player_id']})
+        return np.array((randint(0, 17), randint(0, 17), randint(0, 3)))
 
-        # TODO: get additional game state ("other") as per the official generals.io interface (?)
-        # for transfer to "real"
+    def get_random_semi_valid_action(self, player_id):
+        valid_start = np.logical_and(self.map.owner == player_id, self.map.armies > 1)
+        valid_start = np.transpose(valid_start.nonzero())
+        start = valid_start[randint(0, len(valid_start) - 1)]
+        return np.array((start[0], start[1], randint(0, 3)))
 
-        return observation
+    def is_friendly_square(self, x, y, player_id=1):
+        return self.map.owner[x, y] == player_id
+
+    def is_valid_action(self, action):
+        start_location = (action[0], action[1])
+        end_location = self._get_movement_for_action(start_location, action[2])
+        return self.map.is_valid_action(self.map.players[1], start_location, end_location)
+
+    def get_nearest_valid_action(self, action, player_id=1):
+        """Returns the action closest to ACTION that is actually valid.
+        Only the square will ever be changed: it will become the nearest square that is owned by player PLAYER_ID
+        and has > 1 army unit on it. If player PLAYER_ID has no valid moves, the input action will be returned.
+        """
+        if self.is_valid_action(action):
+            return action
+        valid_start = np.logical_and(self.map.owner == player_id, self.map.armies > 1)
+        valid_start = np.transpose(valid_start.nonzero())
+        if len(valid_start) == 0:
+            return action
+        dist = (valid_start[:, 0] - action[0]) ** 2 + (valid_start[:, 1] - action[1]) ** 2
+        start_location = valid_start[dist.argmin()]
+        return start_location[0], start_location[1], action[2]
+
+    def get_valid_action_from_q_values(self, q_values, player_id=1):
+        """
+        If there is one Q-value - (x, y, dir):
+        - Select the VALID (x, y, dir) with the highest Q value.
+
+        If there are three Q values - x, y, and dir:
+        - Select the VALID (x, y) with the highest q_x[x] + q_y[y].
+        - Select the dir with the highest q_dir[dir].
+        * assumes x is vertical (first index into NumPy arrays), and y is horizontal
+        * assumes Q_X and Q_Y are both (1, 18) arrays
+        """
+        if len(q_values) == 1:
+            q_values = np.reshape(q_values, (MAP_SIZE, MAP_SIZE, 4))
+            valid_start = np.logical_and(self.map.owner == player_id, self.map.armies > 1)
+            q_values_valid = q_values * np.repeat(valid_start[:, :, None], 4, axis=2)
+            act_x, act_y, act_dir = np.unravel_index(np.argmax(q_values_valid), q_values_valid.shape)
+        elif len(q_values) == 3:
+            q_x, q_y, q_dir = q_values
+            q_xy = np.repeat(q_x.T, MAP_SIZE, axis=1) + np.repeat(q_y, MAP_SIZE, axis=0)
+            q_xy_valid = q_xy * np.logical_and(self.map.owner == player_id, self.map.armies > 1)
+            act_x, act_y = np.unravel_index(np.argmax(q_xy_valid), q_xy_valid.shape)
+            act_dir = np.argmax(q_dir)
+        else:
+            raise NotImplementedError('action space not supported')
+        return np.array((act_x, act_y, act_dir))
+
+    def _flat_to_2d(self, index):
+        return index // MAP_SIZE, index % MAP_SIZE
+
+    def get_image_of_state(self, state):
+        mountains = state['mountains']
+        generals = state['generals']
+        hidden_terrain = state['hidden_terrain']
+        fog = state['fog']
+        friendly = state['friendly']
+        enemy = state['enemy']
+        cities = state['cities']
+        last_location = state['last_location']
+
+        size = 400
+        step = size / MAP_SIZE
+        image = Image.new('RGBA', (size, size), (255, 255, 255, 255))
+        d = ImageDraw.Draw(image)
+        colors = [
+            (255, 255, 255, 255),   # 0 - Empty - white
+            (),                     # 1 - General - no color
+            (0, 136, 34, 255),      # 2 - City - Green
+            (128, 64, 0, 255),      # 3 - Mountain - Brown
+            (32, 32, 32, 255),      # 4 - Fog - Dark Grey
+            (124, 124, 124, 255),   # 5 - Terrain Fog - Grey
+            (0, 0, 255, 255),       # 6 - Blue player
+            (255, 0, 0, 255),        # 7 - Red player
+            (0, 0, 100, 255)        # 8 - Blue player last location - Dark Blue
+        ]
+        dir = os.path.dirname(__file__)
+        try:
+            font = ImageFont.truetype(os.path.join(dir, 'FreeMono.ttf'), 40)
+        except IOError as e:
+            print('IOError: failed to open font file at %s.' % os.path.join(dir, 'FreeMono.ttf'))
+        for i in range(MAP_SIZE):
+            for j in range(MAP_SIZE):
+                d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[0])
+                if mountains[i,j]: # Hack
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[3])
+                if friendly[i, j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[6])
+                    general = ''
+                    if generals[i, j]:
+                        general = '*'
+                    d.text((i * step + step//4, j * step + step//4), str(int(friendly[i, j])) + general, fill=colors[0])
+                if enemy[i,j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[7])
+                    general = ''
+                    if generals[i, j]:
+                        general = '*'
+                    d.text((i * step + step//4, j * step + step//4), str(int(enemy[i, j])) + general, fill=colors[0])
+                if cities[i,j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[2])
+                    d.text((i * step + step//4, j * step + step//4), str(int(cities[i, j])), fill=colors[0])
+                if mountains[i,j]:
+                    d.text((i * step + step//4, j * step + step//4), '^^', fill=colors[0])
+                if fog[i,j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[4])
+                if hidden_terrain[i,j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[5])
+                    d.text((i * step + step//4, j * step + step//4), '??', fill=colors[0])
+                if (i,j) == last_location:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[8])
+                    general = ''
+                    if generals[i, j]:
+                        general = '*'
+                    d.text((i * step + step//4, j * step + step//4), str(int(friendly[i, j])) + general, fill=colors[0])
+        del d
+        return image

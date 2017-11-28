@@ -1,0 +1,114 @@
+# -------------------------------------
+# RTS Policy Distillation - Config File
+# -------------------------------------
+
+# RUN INFO
+# --------
+
+env: generals_sim
+operation: train  # (train,)
+
+train_params:
+  random_seed: 0
+  num_timesteps: 40000000
+  replay_buffer_size: 1000000
+  batch_size: 32
+  gamma: 0.5
+  learning_starts: 50000
+  learning_freq: 1
+  frame_history_len: 1
+  target_update_freq: 10000
+  grad_norm_clipping: 10
+  exploration_schedule: [(0, 1.00), (5e5, 0.30), (8e5, 0.10), (1e6, 0.01)]
+
+# ENV-SPECIFIC INFO
+# ------------------
+generals_sim:
+  map_height: 18
+  map_width: 18
+  map_player_count: 2
+
+reset_kwargs:
+  map_init: empty
+  player_id: 1
+
+step_kwargs:
+  player_id: 1
+
+# MODEL ARCHITECTURE
+# ------------------
+
+dqn_arch:
+  inputs:
+#    mountains:
+#      dtype: float32
+#      shape: [18, 18]
+#    generals:
+#      dtype: float32
+#      shape: [18, 18]
+#    hidden_terrain:
+#      dtype: float32
+#      shape: [18, 18]
+#    fog:
+#      dtype: float32
+#      shape: [18, 18]
+    friendly:
+      dtype: uint8
+      shape: [18, 18]
+#    enemy:
+#      dtype: float32
+#      shape: [18, 18]
+#    cities:
+#      dtype: float32
+#      shape: [18, 18]
+
+  layers:
+    - inputs: [friendly]
+      type: conv2d
+      num_outputs: 32
+      kernel_size: 8
+      stride: 4
+      batch_norm: False
+      activation: elu
+#    - type: conv2d
+#      num_outputs: 64
+#      kernel_size: 4
+#      stride: 2
+#      batch_norm: False
+#      activation: elu
+    - type: conv2d
+      num_outputs: 64
+      kernel_size: 3
+      stride: 1
+      batch_norm: False
+      activation: elu
+    - type: fc
+      num_outputs: 256
+      batch_norm: True
+      activation: elu
+    - type: fc
+      num_outputs: 256
+      batch_norm: True
+      activation: elu
+
+  outputs:
+    action:
+      dtype: int32
+      shape: [1296] # 18 * 18 * 4
+      activation: X
+
+#    target_x:
+#      dtype: float32
+#      shape: [18]
+#      activation: X
+#      order: 0
+#    target_y:
+#      dtype: float32
+#      shape: [18]
+#      activation: X
+#      order: 1
+#    direction:
+#      dtype: float32
+#      shape: [4]  # five actions centered around active square
+#      activation: X
+#      order: 2

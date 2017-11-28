@@ -8,6 +8,18 @@
 env: generals_sim
 operation: train  # (train,)
 
+train_params:
+  random_seed: 0
+  num_timesteps: 40000000
+  replay_buffer_size: 1000000
+  batch_size: 32
+  gamma: 0.5
+  learning_starts: 50000
+  learning_freq: 1
+  frame_history_len: 1
+  target_update_freq: 10000
+  grad_norm_clipping: 10
+
 # ENV-SPECIFIC INFO
 # ------------------
 # (DEP)
@@ -15,6 +27,13 @@ generals_sim:
   map_height: 18
   map_width: 18
   map_player_count: 2
+
+reset_kwargs:
+  map_init: empty
+  player_id: 1
+
+step_kwargs:
+  player_id: 1
 
 # MODEL ARCHITECTURE
 # ------------------
@@ -73,7 +92,7 @@ dqn_arch:
       dtype: float32
       shape: [18]
       activation: X
-    action:
+    direction:
       dtype: float32
       shape: [4]  # five actions centered around active square
       activation: X

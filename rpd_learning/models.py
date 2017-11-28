@@ -8,7 +8,7 @@ Utilities for constructing a model.
 
 import os
 import tensorflow as tf
-from tensorflow.contrib.layers import fully_connected, convolution2d, flatten
+from tensorflow.contrib.layers import fully_connected, convolution2d, flatten, batch_norm
 
 class Model(object):
     def __init__(self, arch, inputs=None, scope=None, reuse=False):
@@ -75,17 +75,22 @@ class Model(object):
                     layer_type = layer['type']
                     inputs = tf.concat(inputs, axis=1)
                     if layer_type == 'fc':
-                        outputs[i].append(fully_connected(inputs, num_outputs, activation_fn=activation_fn,
-                                                          biases_initializer=biases_initializer))
+                        _output = fully_connected(inputs, num_outputs, activation_fn=None,
+                                                  biases_initializer=biases_initializer)
                     elif layer_type == 'conv2d':
-                        outputs[i].append(convolution2d(inputs, num_outputs, kernel_size=layer['kernel_size'],
-                                                        stride=layer['stride'], activation_fn=activation_fn,
-                                                        biases_initializer=biases_initializer))
-                        if i < len(layers) and layers[i + 1]['type'] == 'fc':
-                            # If the next layer is a fully connected layer, we need to flatten this output
-                            outputs[i][-1] = flatten(outputs[i][-1])
+                        _output = convolution2d(inputs, num_outputs, kernel_size=layer['kernel_size'],
+                                                stride=layer['stride'], activation_fn=None,
+                                                biases_initializer=biases_initializer)
                     else:
                         raise NotImplementedError
+                    if layer.get('batch_norm', False):
+                        _output = batch_norm(_output, is_training=True)  # TODO: set `is_training` via flag or something
+                    if activation_fn is not None:
+                        _output = activation_fn(_output)
+                    outputs[i].append(_output)
+                    if layer_type == 'conv2d' and i < len(layers) and layers[i + 1]['type'] == 'fc':
+                        # If convolution layer into fully connected layer, we need to flatten this output
+                        outputs[i][-1] = flatten(outputs[i][-1])
         return outputs
 
     def load_output(self, output_name, output_info, inputs):
