@@ -6,3 +6,4 @@ img/
 *.ttf
 q_func/
 target/
+tmp/

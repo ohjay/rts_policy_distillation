@@ -11,17 +11,15 @@ import operator
 import datetime
 import functools, itertools
 import tensorflow as tf
-from collections import namedtuple, defaultdict
+from collections import namedtuple
 
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
-from random import random
+import random
 
 
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
-
 _LAUNCH_TIME = datetime.datetime.now()
-_NO_OP = 4
 
 def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(1000000, 0.1), stopping_criterion=None,
           replay_buffer_size=1000000, batch_size=32, gamma=0.99, learning_starts=50000, learning_freq=4,
@@ -40,7 +38,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         Specifying the constructor and kwargs, as well as learning rate schedule for the optimizer.
     session: tf.Session
         TensorFlow session to use.
-    exploration: dqn_utils.Schedule
+    exploration: rpd_learning.dqn_utils.Schedule
         Schedule for probability of choosing random action.
     stopping_criterion: (env, t) -> bool
         Should return true when it's okay for the RL algorithm to stop.
@@ -131,7 +129,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         _num = arch['outputs'][output_name]['shape'][0]
         q_out = q_func.outputs[output_name]
         target_out = target_q_func.outputs[output_name]
-        all_q_j.append(tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1))
+        all_q_j.append(tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1))  # TODO: encoded correctly via `tf.one_hot`?
         all_y_j.append(rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1)))
 
     total_error = 0
@@ -163,34 +161,33 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     model_initialized = False
     obs_mean, obs_std = {}, {}
     num_param_updates = 0
-    player_output, _ = env.reset(map_init='empty')
-    state, reward, done = player_output
-    last_obs_np = _obs_to_np(state)
+    reset_kwargs = config.get('reset_kwargs', {})
+    step_kwargs = config.get('step_kwargs', {})
+    last_obs, reward, done = env.reset(**reset_kwargs)
+    last_obs_np = _obs_to_np(last_obs)
     log_freq = 150
     play_count = 0
     game_steps = 0
 
     last_episode_rewards = []
     episode_rewards = []
-
     mean_episode_rewards = []
     max_episode_rewards = []
 
     save_images = False
 
     for t in itertools.count():
-        # 1. Check stopping criterion
         if stopping_criterion is not None and stopping_criterion(env, t):
             break
 
-        # 2. Step the env and store the transition in the replay buffer
+        # Step the env and store the transition in the replay buffer
         idx = replay_buffer.store_frame(last_obs_np)
 
         # Choose action via epsilon greedy exploration
         eps = exploration.value(t)
-        if not model_initialized or random() < eps:
+        if not model_initialized or random.random() < eps:
             # If first step, choose a random action
-            action = env.get_random_semi_valid_action(1)
+            action = env.get_random_action(semi_valid=True, player_id=1)
         else:
             obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
             feed_dict = {}
@@ -203,19 +200,19 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             q_values = session.run(fetches, feed_dict=feed_dict)
             action = env.get_valid_action_from_q_values(q_values)
 
-        player_output, _ = env.step(action)
-        last_obs, reward, done = player_output
+        last_obs, reward, done = env.step(action, **step_kwargs)
         replay_buffer.store_effect(idx, action, reward, done)
         if save_images and len(last_obs):
-            run_dir = os.path.join('img', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
-            if not os.path.exists(run_dir):
-                os.makedirs(run_dir)
-                print('Created directory at %s.' % run_dir)
-            env.get_image_of_state(last_obs).save("{}/Game_{}_Step_{}.png".format(run_dir, play_count, game_steps))
+            image = env.get_image_of_state(last_obs)
+            if image is not None:
+                run_dir = os.path.join('img', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
+                if not os.path.exists(run_dir):
+                    os.makedirs(run_dir)
+                    print('Created directory at %s.' % run_dir)
+                image.save("{}/Game_{}_Step_{}.png".format(run_dir, play_count, game_steps))
 
         if done:
-            player_output, _ = env.reset(map_init='empty')
-            last_obs, reward, done = player_output
+            last_obs, reward, done = env.reset(**reset_kwargs)
             last_obs_np = _obs_to_np(last_obs)
 
             last_episode_rewards = episode_rewards
@@ -230,14 +227,12 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             episode_rewards.append(reward)
             game_steps += 1
 
-        # At this point, the environment should have been advanced one step (and
-        # reset if done was true), last_obs_np should point to the new latest observation,
+        # At this point, the environment should have been advanced one step (and reset if `done` was true),
+        # `last_obs_np` should point to the new latest observation,
         # and the replay buffer should contain one more transition.
 
-        # 3. Perform experience replay and train the network.
-        # note that this is only done if the replay buffer contains enough samples
-        # for us to learn something useful -- until then, the model will not be
-        # initialized and random actions should be taken
+        # Perform experience replay and train the network
+        # (once the replay buffer contains enough samples for us to learn something useful)
         if t > learning_starts and t % learning_freq == 0 and replay_buffer.can_sample(batch_size):
             # Use replay buffer to sample a batch of transitions
             obs_batch_np, act_batch, rew_batch, next_obs_batch_np, done_mask = replay_buffer.sample(batch_size)
@@ -272,7 +267,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 session.run(update_target_fn)
             num_param_updates += 1
 
-        # 4. Log progress
+        # Log progress
         if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
             print('timestep %d' % t)
             print('-----')
@@ -288,7 +283,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
             sys.stdout.flush()
 
-            # Save network parameters
+            # Save network parameters and images from next episode
             q_func.save(session, t, outfolder='q_func')
             target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
             save_images = True
