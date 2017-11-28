@@ -7,3 +7,4 @@ img/
 q_func/
 target/
 tmp/
+.checkpoints/

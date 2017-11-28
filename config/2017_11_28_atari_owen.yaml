@@ -30,25 +30,25 @@ dqn_arch:
   inputs:
     ram_in:
       dtype: uint8
-      shape: [128]  # determined as `env.observation_space.shape`
+      shape: [128]  # as determined by `env.observation_space.shape`
 
   layers:
     - inputs: [ram_in]
       type: fc
       num_outputs: 256
-      batch_norm: True
+      batch_norm: False
       activation: relu
     - type: fc
       num_outputs: 128
-      batch_norm: True
+      batch_norm: False
       activation: relu
     - type: fc
       num_outputs: 64
-      batch_norm: True
+      batch_norm: False
       activation: relu
 
   outputs:
     action:
       dtype: int32
-      shape: [6]  # determined as `env.action_space.n`
+      shape: [6]  # as determined by `env.action_space.n`
       activation: X

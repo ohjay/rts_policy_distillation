@@ -6,6 +6,7 @@ dqn.py
 Deep Q-network as described by CS 294-112 (goo.gl/MhA4eA).
 """
 
+import yaml
 import os, sys
 import operator
 import datetime
@@ -60,6 +61,12 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     grad_norm_clipping: float or None
         If not None gradients' norms are clipped to this value.
     """
+
+    # Set up checkpoint folder
+    checkpoint_dir = os.path.join('.checkpoints', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
+    os.makedirs(checkpoint_dir)
+    with open(os.path.join(checkpoint_dir, 'config_in.yaml'), 'w') as outfile:
+        yaml.dump(config, outfile, default_flow_style=False)  # save the config as backup
 
     ###############
     # BUILD MODEL #
@@ -286,6 +293,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             sys.stdout.flush()
 
             # Save network parameters and images from next episode
-            q_func.save(session, t, outfolder='q_func')
-            target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
+            q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
+            target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))  # maybe don't need both
             save_images = True
