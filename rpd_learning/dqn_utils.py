@@ -270,7 +270,7 @@ class ReplayBuffer(object):
             Index at which the frame is stored. To be used for `store_effect` later.
         """
         if self.obs is None:
-            self.obs      = np.empty([self.size] + list(frame.shape), dtype=np.uint8)
+            self.obs = np.empty([self.size] + list(frame.shape), dtype=np.uint8)
             
         self.obs[self.next_idx] = frame
 
@@ -298,9 +298,9 @@ class ReplayBuffer(object):
             True if episode was finished after performing that action.
         """
         if self.action is None:
-            self.action   = np.empty([self.size] + list(action.shape),dtype=np.int32)
-            self.reward   = np.empty([self.size],                     dtype=np.float32)
-            self.done     = np.empty([self.size],                     dtype=np.bool)
+            self.action = np.empty([self.size] + list(action.shape), dtype=np.int32)
+            self.reward = np.empty([self.size],                      dtype=np.float32)
+            self.done   = np.empty([self.size],                      dtype=np.bool)
 
         self.action[idx] = action
         self.reward[idx] = reward

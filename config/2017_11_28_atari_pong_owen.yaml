@@ -1,0 +1,60 @@
+# -------------------------------------
+# RTS Policy Distillation - Config File
+# -------------------------------------
+
+# RUN INFO
+# --------
+
+env: atari_pong
+operation: train  # (train,)
+
+train_params:
+  random_seed: 0
+  num_timesteps: 40000000
+  lr_multiplier: 10.0
+  replay_buffer_size: 1000000
+  batch_size: 32
+  gamma: 0.99
+  learning_starts: 50000
+  learning_freq: 4
+  frame_history_len: 4
+  target_update_freq: 10000
+  grad_norm_clipping: 10
+  exploration_schedule: [(0, 0.20), (5e5, 0.30), (8e5, 0.10), (1e6, 0.01)]
+  log_freq: 150  # log every X episodes
+
+# MODEL ARCHITECTURE
+# ------------------
+
+dqn_arch:
+  inputs:
+    img_in:
+      dtype: uint8
+      shape: [84, 84, 4]  # (img_h, img_w, frame_history_len * img_c)
+
+  layers:
+    - inputs: [img_in]
+      type: conv2d
+      num_outputs: 32
+      kernel_size: 8
+      stride: 4
+      activation: relu
+    - type: conv2d
+      num_outputs: 64
+      kernel_size: 4
+      stride: 2
+      activation: relu
+    - type: conv2d
+      num_outputs: 64
+      kernel_size: 3
+      stride: 1
+      activation: relu
+    - type: fc
+      num_outputs: 512
+      activation: relu
+
+  outputs:
+    action:
+      dtype: int32
+      shape: [6]  # as determined by `env.action_space.n`
+      activation: X

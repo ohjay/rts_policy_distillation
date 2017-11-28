@@ -10,7 +10,7 @@ import tensorflow as tf
 from rpd_learning.dqn_utils import PiecewiseSchedule
 from rpd_learning import dqn
 
-SUPPORTED_ENVS = {'generals', 'generals_sim', 'atari_pong_ram'}
+SUPPORTED_ENVS = {'generals', 'generals_sim', 'atari_pong', 'atari_pong_ram'}
 SUPPORTED_OPS = {'train'}
 
 def get_available_gpus():
@@ -63,7 +63,7 @@ def train(env, config):
     # ], outside_value=0.01)
 
     exploration_schedule = PiecewiseSchedule([
-        (0,                  0.20),
+        (0,                  1.00),
         (1e6,                0.10),
         (num_iterations / 2, 0.01),
     ], outside_value=0.01)
@@ -98,7 +98,7 @@ def run(config):
     elif config['env'] == 'generals_sim':
         from rpd_interfaces.generals import generals_sim
         env = generals_sim.GeneralsEnv('replays_prod/')
-    elif config['env'].startswith('atari_pong_ram'):
+    elif config['env'].startswith('atari_pong'):
         from rpd_interfaces.atari import atari
         env = atari.AtariEnv(config['env'])
 
