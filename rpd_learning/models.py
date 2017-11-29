@@ -7,6 +7,7 @@ Utilities for constructing a model.
 """
 
 import os
+import copy
 import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected, convolution2d, flatten, batch_norm
 
@@ -45,7 +46,7 @@ class Model(object):
     @staticmethod
     def load_placeholder(placeholder_info):
         dtype = placeholder_info['dtype']
-        shape = [None] + placeholder_info['shape']
+        shape = [None] + list(placeholder_info['shape'])
         return tf.placeholder(getattr(tf, dtype), shape=shape)
 
     def load_layers(self, layers):
@@ -59,9 +60,9 @@ class Model(object):
                     outputs[i].extend(layer_output)
                 else:
                     if i > 0:
-                        inputs = layer.get('inputs', []) + outputs[i - 1]  # use output of previous layer as default
+                        inputs = copy.deepcopy(layer.get('inputs', [])) + outputs[i - 1]  # use output of previous layer as default
                     else:
-                        inputs = layer['inputs']  # inputs required for first layer
+                        inputs = copy.deepcopy(layer['inputs'])  # inputs required for first layer
                     for j in range(len(inputs)):
                         if type(inputs[j]) == str:
                             inputs[j] = self.inputs[inputs[j]]

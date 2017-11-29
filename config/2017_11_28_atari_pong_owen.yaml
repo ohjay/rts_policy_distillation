@@ -22,7 +22,7 @@ train_params:
   grad_norm_clipping: 10
   exploration_schedule: [(0, 0.20), (5e5, 0.30), (8e5, 0.10), (1e6, 0.01)]  # TODO: isn't used yet
   normalize_inputs: False
-  log_freq: 150  # log every X episodes
+  log_freq: 50  # log every X episodes
   log_recent_rewards: False
   save_images: False
 
