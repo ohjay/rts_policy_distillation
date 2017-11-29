@@ -17,7 +17,7 @@ def merge_dicts(*args):
     return z
 
 def sample_n_unique(sampling_f, n):
-    """Helper function. Given a function `sampling_f` that returns
+    """Helper function. Given a function SAMPLING_F that returns
     comparable objects, sample n such unique objects.
     """
     res = []
@@ -31,9 +31,8 @@ def linear_interpolation(l, r, alpha):
     return l + alpha * (r - l)
 
 def minimize_and_clip(optimizer, objective, var_list, clip_val=10):
-    """Minimized `objective` using `optimizer` w.r.t. variables in
-    `var_list` while ensure the norm of the gradients for each
-    variable is clipped to `clip_val`
+    """Minimize OBJECTIVE using OPTIMIZER w.r.t. variables in VAR_LIST,
+    while ensuring that the norm of the gradients for each variable is clipped to CLIP_VAL.
     """
     gradients = optimizer.compute_gradients(objective, var_list=var_list)
     for i, (grad, var) in enumerate(gradients):
@@ -50,8 +49,6 @@ def initialize_interdependent_variables(session, vars_list, feed_dict):
         new_vars_left = []
         for v in vars_left:
             try:
-                # If using an older version of TensorFlow, uncomment the line
-                # below and comment out the line after it.
                 session.run(tf.variables_initializer([v]), feed_dict)
             except tf.errors.FailedPreconditionError:
                 new_vars_left.append(v)
@@ -91,12 +88,12 @@ class PiecewiseSchedule(Schedule):
         assert idxes == sorted(idxes)
         self._interpolation = interpolation
         self._outside_value = outside_value
-        self._endpoints      = endpoints
+        self._endpoints = endpoints
 
     def value(self, t):
         """Value of the schedule at time t."""
         for (l_t, l), (r_t, r) in zip(self._endpoints[:-1], self._endpoints[1:]):
-            if l_t <= t and t < r_t:
+            if l_t <= t < r_t:
                 alpha = float(t - l_t) / (r_t - l_t)
                 return self._interpolation(l, r, alpha)
 
@@ -123,7 +120,7 @@ class LinearSchedule(Schedule):
 
     def value(self, t):
         """Value of the schedule at time t."""
-        fraction  = min(float(t) / self.schedule_timesteps, 1.0)
+        fraction = min(float(t) / self.schedule_timesteps, 1.0)
         return self.initial_p + fraction * (self.final_p - self.initial_p)
 
 class ReplayBuffer(object):
@@ -159,10 +156,10 @@ class ReplayBuffer(object):
         self.next_idx      = 0
         self.num_in_buffer = 0
 
-        self.obs      = None
-        self.action   = None
-        self.reward   = None
-        self.done     = None
+        self.obs    = None
+        self.action = None
+        self.reward = None
+        self.done   = None
 
     def can_sample(self, batch_size):
         """Returns true if `batch_size` different transitions can be sampled from the buffer."""
@@ -260,7 +257,7 @@ class ReplayBuffer(object):
             Index at which the frame is stored. To be used for `store_effect` later.
         """
         if self.obs is None:
-            self.obs = np.empty([self.size] + list(frame.shape), dtype=np.uint8)
+            self.obs = np.empty([self.size] + list(frame.shape), dtype=np.uint8)  # TODO: don't restrict to uint8
             
         self.obs[self.next_idx] = frame
 
@@ -279,7 +276,7 @@ class ReplayBuffer(object):
         ---------
         idx: int
             Index in buffer of recently observed frame (returned by `store_frame`).
-        action: int
+        action: np.array
             Action that was performed upon observing this frame.
         reward: float
             Reward that was received when the actions was performed.

@@ -173,14 +173,17 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     # RUN ENV #
     ###########
 
+    train_params = config.get('train_params', {})
     model_initialized = False
+    moments_initialized = False
     obs_mean, obs_std = {}, {}
     num_param_updates = 0
     reset_kwargs = config.get('reset_kwargs', {})
     step_kwargs = config.get('step_kwargs', {})
     last_obs, reward, done = env.reset(**reset_kwargs)
     last_obs_np = _obs_to_np(last_obs)
-    log_freq = config.get('train_params', {}).get('log_freq', 150)
+    normalize_inputs = train_params.get('normalize_inputs', True)
+    log_freq = train_params.get('log_freq', 150)
     play_count = 0
     game_steps = 0
 
@@ -208,7 +211,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
             feed_dict = {}
             for input_name in obs_recent.keys():
-                obs_recent[input_name] = (obs_recent[input_name] - obs_mean[input_name]) / obs_std[input_name]
+                if normalize_inputs:
+                    obs_recent[input_name] = (obs_recent[input_name] - obs_mean[input_name]) / obs_std[input_name]
                 shaped_val = np.reshape(obs_recent[input_name], (1,) + obs_recent[input_name].shape)
                 feed_dict[obs_t_ph[input_name]] = shaped_val
 
@@ -254,25 +258,33 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             obs_batch = _np_to_obs(obs_batch_np)
             next_obs_batch = _np_to_obs(next_obs_batch_np)
 
+            if normalize_inputs:
+                if not moments_initialized:
+                    # Compute observation mean and standard deviation (for use in normalization)
+                    _obs_np, _, _, _, _ = replay_buffer.sample(replay_buffer.num_in_buffer - 1)
+                    _obs = _np_to_obs(_obs_np, batched=True)
+                    obs_mean = {input_name: np.mean(_obs[input_name], axis=0) for input_name in _obs.keys()}
+                    obs_std = {input_name: np.std(_obs[input_name], axis=0) + 1e-9 for input_name in _obs.keys()}
+                    _obs_np, _obs = None, None
+                    moments_initialized = True
+                obs_t_feed = {obs_t_ph[_name]: (obs_batch[_name] - obs_mean[_name]) / obs_std[_name]
+                              for _name in obs_batch.keys()}
+                obs_tp1_feed = {obs_tp1_ph[_name]: (next_obs_batch[_name] - obs_mean[_name]) / obs_std[_name]
+                                for _name in next_obs_batch.keys()}
+            else:
+                obs_t_feed = {obs_t_ph[_name]: obs_batch[_name] for _name in obs_batch.keys()}
+                obs_tp1_feed = {obs_tp1_ph[_name]: next_obs_batch[_name] for _name in next_obs_batch.keys()}
+
             # Initialize the model
             if not model_initialized:
-                # Compute observation mean and standard deviation (for use in normalization)
-                _obs_np, _, _, _, _ = replay_buffer.sample(replay_buffer.num_in_buffer - 1)
-                _obs = _np_to_obs(_obs_np, batched=True)
-                obs_mean = {input_name: np.mean(_obs[input_name], axis=0) for input_name in _obs.keys()}
-                obs_std = {input_name: np.std(_obs[input_name], axis=0) + 1e-9 for input_name in _obs.keys()}
-                _obs_np, _obs = None, None
-
-                initialize_interdependent_variables(session, tf.global_variables(), merge_dicts(
-                    {obs_t_ph[input_name]: obs_batch[input_name] for input_name in obs_batch.keys()},
-                    {obs_tp1_ph[input_name]: next_obs_batch[input_name] for input_name in next_obs_batch.keys()}
-                ))
+                initialize_interdependent_variables(session, tf.global_variables(),
+                                                    merge_dicts(obs_t_feed, obs_tp1_feed))
                 model_initialized = True
 
             # Train the model
             session.run(train_fn, merge_dicts(
-                {obs_t_ph[_name]: (obs_batch[_name] - obs_mean[_name]) / obs_std[_name] for _name in obs_batch.keys()},
-                {obs_tp1_ph[_name]: (next_obs_batch[_name] - obs_mean[_name]) / obs_std[_name] for _name in next_obs_batch.keys()},
+                obs_t_feed,
+                obs_tp1_feed,
                 {act_t_ph[output_name]: act_batch[:, i] for i, output_name in enumerate(output_names)},
                 {rew_t_ph: rew_batch, done_mask_ph: done_mask, learning_rate: optimizer_spec.lr_schedule.value(t)}
             ))
@@ -288,19 +300,22 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         if len(episode_returns) > 100:
             best_mean_episode_return = max(best_mean_episode_return, mean_episode_return)
         if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
-            print('timestep %d' % t)
-            print('-----')
-            print('mean return (100 episodes) %f' % mean_episode_return)
+            mean_return_output = 'mean return (100 episodes) %f' % mean_episode_return
+            print(('step %d ' % t).ljust(len(mean_return_output), '-'))
+            print(mean_return_output)
             print('best mean return (100 episodes) %f' % best_mean_episode_return)
             print('episodes %d' % len(episode_returns))
             print('exploration %f' % exploration.value(t))
             print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
-            print('-----')
-            print('mean of recent rewards %.2f' % np.mean(last_episode_rewards))
-            print('recent rewards %r' % last_episode_rewards)
-            sys.stdout.flush()
+
+            if train_params.get('log_recent_rewards', True):
+                print('mean of recent rewards %.2f' % np.mean(last_episode_rewards))
+                print('recent rewards %r' % last_episode_rewards)
 
             # Save network parameters and images from next episode
             q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
             target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))  # maybe don't need both
-            save_images = True
+            save_images = train_params.get('save_images', True)
+
+            print('')  # newline
+            sys.stdout.flush()
