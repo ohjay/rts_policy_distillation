@@ -36,7 +36,7 @@ class Model(object):
 
         # Connect the outputs
         inputs = layer_outputs[-1] if layer_outputs else self.inputs.values()
-        inputs = tf.concat(inputs, axis=1)
+        inputs = tf.concat(inputs, axis=1) if len(inputs) > 1 else inputs[-1]
         with tf.variable_scope('outputs'):
             for output_name, output_info in arch['outputs'].items():
                 self.outputs[output_name] = self.load_output(output_name, output_info, inputs)
@@ -71,15 +71,18 @@ class Model(object):
                         activation_fn = getattr(tf.nn, layer['activation'])
                     except AttributeError:
                         activation_fn = None
-                    biases_initializer = tf.constant_initializer(layer.get('biases_init', 0.0))
+                    if 'biases_init' in layer:
+                        biases_initializer = tf.constant_initializer(layer['biases_init'])
+                    else:
+                        biases_initializer = tf.zeros_initializer()  # default
 
                     layer_type = layer['type']
-                    inputs = tf.concat(inputs, axis=1)
+                    inputs = tf.concat(inputs, axis=1) if len(inputs) > 1 else inputs[-1]
                     if layer_type == 'fc':
-                        _output = fully_connected(inputs, num_outputs, activation_fn=None,
+                        _output = fully_connected(inputs, num_outputs=num_outputs, activation_fn=None,
                                                   biases_initializer=biases_initializer)
                     elif layer_type == 'conv2d':
-                        _output = convolution2d(inputs, num_outputs, kernel_size=layer['kernel_size'],
+                        _output = convolution2d(inputs, num_outputs=num_outputs, kernel_size=layer['kernel_size'],
                                                 stride=layer['stride'], activation_fn=None,
                                                 biases_initializer=biases_initializer)
                     else:
@@ -102,7 +105,10 @@ class Model(object):
             activation_fn = getattr(tf.nn, output_info.get('activation', 'relu'))
         except AttributeError:
             activation_fn = None
-        biases_initializer = tf.constant_initializer(output_info.get('biases_init', 0.0))
+        if 'biases_init' in output_info:
+            biases_initializer = tf.constant_initializer(output_info['biases_init'])
+        else:
+            biases_initializer = tf.zeros_initializer()  # default
         outputs = fully_connected(inputs, num_outputs, activation_fn=activation_fn, biases_initializer=biases_initializer)
 
         # Loss
