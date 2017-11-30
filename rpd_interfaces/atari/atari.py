@@ -55,7 +55,7 @@ class AtariEnv(Environment):
     def get_random_action(self, **kwargs):
         return np.array((self.env.action_space.sample(),))
 
-    def get_valid_action_from_q_values(self, q_values):
+    def get_action_from_q_values(self, q_values, **kwargs):
         return np.array((np.argmax(q_values),))
 
     def step(self, action, **kwargs):

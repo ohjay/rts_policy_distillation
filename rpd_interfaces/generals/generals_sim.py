@@ -16,10 +16,11 @@ from rpd_interfaces.generals.simulator import *
 from rpd_interfaces.interfaces import Environment
 
 class GeneralsEnv(Environment):
-    def __init__(self, root_dir):
+    def __init__(self, root_dir, reward_fn_name=None):
         listdir = os.listdir(root_dir)
         self.replays = [root_dir + file for file in listdir if file.endswith('.gioreplay')]
         self.map = None
+        self.reward_fn_name = reward_fn_name
 
     def reset(self, map_init='random', player_id=1):
         """Sets the map using a random replay"""
@@ -72,7 +73,7 @@ class GeneralsEnv(Environment):
             replay = json.load(open(self.replays[index]))
             if len(replay['usernames']) == 2 and replay['mapWidth'] == 18 and replay['mapHeight'] == 18:
                 break
-        m = Map()
+        m = Map(self.reward_fn_name)
         if include_mountains:
             for mountain in replay['mountains']:
                 m.add_mountain(self._flat_to_2d(mountain))
@@ -120,6 +121,19 @@ class GeneralsEnv(Environment):
         dist = (valid_start[:, 0] - action[0]) ** 2 + (valid_start[:, 1] - action[1]) ** 2
         start_location = valid_start[dist.argmin()]
         return start_location[0], start_location[1], action[2]
+
+    def get_action_from_q_values(self, q_values, ensure_valid=False):
+        if ensure_valid:
+            return self.get_valid_action_from_q_values(q_values)
+        if len(q_values) == 1:
+            q_values = np.reshape(q_values, (MAP_SIZE, MAP_SIZE, 4))
+            act_x, act_y, act_dir = np.unravel_index(np.argmax(q_values), q_values.shape)
+        elif len(q_values) == 3:
+            act_x, act_y = np.argmax(q_values[0]), np.argmax(q_values[1])
+            act_dir = np.argmax(q_values[2])
+        else:
+            raise NotImplementedError('action space not supported')
+        return np.array((act_x, act_y, act_dir))
 
     def get_valid_action_from_q_values(self, q_values, player_id=1):
         """

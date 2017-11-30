@@ -40,6 +40,7 @@ generals_sim:
   map_height: 18
   map_width: 18
   map_player_count: 2
+  reward_fn_name: move_made  # choice of reward function in `simulator.py`
 
 reset_kwargs:
   map_init: empty  # choices: (empty, random)
@@ -47,6 +48,9 @@ reset_kwargs:
 
 step_kwargs:
   player_id: 1
+
+get_action_kwargs:
+  ensure_valid: False  # ensure that Q values produce a VALID action?
 
 # MODEL ARCHITECTURE
 # ------------------
@@ -77,27 +81,14 @@ dqn_arch:
 
   layers:
     - inputs: [friendly]
-      type: conv2d
-      num_outputs: 32
-      kernel_size: 8
-      stride: 4
-      batch_norm: False
-      activation: relu
-    - type: conv2d
-      num_outputs: 64
-      kernel_size: 4
-      stride: 2
-      batch_norm: False
-      activation: relu
-    - type: conv2d
-      num_outputs: 64
-      kernel_size: 3
-      stride: 1
-      batch_norm: False
+      type: fc
+      num_outputs: 512
       activation: relu
     - type: fc
-      num_outputs: 512
-      batch_norm: False
+      num_outputs: 256
+      activation: relu
+    - type: fc
+      num_outputs: 128
       activation: relu
 
   outputs:

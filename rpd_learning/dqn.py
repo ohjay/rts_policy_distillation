@@ -266,6 +266,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     num_param_updates = 0
     reset_kwargs = config.get('reset_kwargs', {})
     step_kwargs = config.get('step_kwargs', {})
+    get_action_kwargs = config.get('get_action_kwargs', {})
     last_obs, reward, done = env.reset(**reset_kwargs)
     last_obs_np = _obs_to_np(last_obs)
     normalize_inputs = train_params.get('normalize_inputs', True)
@@ -310,7 +311,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
                 fetches = [q_func.outputs[output_name] for output_name in output_names]
                 q_values = session.run(fetches, feed_dict=feed_dict)
-                action = env.get_valid_action_from_q_values(q_values)
+                action = env.get_action_from_q_values(q_values, **get_action_kwargs)
 
             last_obs, reward, done = env.step(action, **step_kwargs)
             replay_buffer.store_effect(idx, action, reward, done)

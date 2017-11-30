@@ -108,7 +108,8 @@ def run(config):
         env = generals.Generals(user_id)
     elif config['env'] == 'generals_sim':
         from rpd_interfaces.generals import generals_sim
-        env = generals_sim.GeneralsEnv('replays_prod/')
+        reward_fn_name = env_info.get('reward_fn_name', None)
+        env = generals_sim.GeneralsEnv('replays_prod/', reward_fn_name=reward_fn_name)
     elif config['env'].startswith('atari_pong'):
         from rpd_interfaces.atari import atari
         env = atari.AtariEnv(config['env'])

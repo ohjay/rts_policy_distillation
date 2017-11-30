@@ -95,6 +95,9 @@ class Model(object):
                     if layer_type == 'conv2d' and i < len(layers) and layers[i + 1]['type'] == 'fc':
                         # If convolution layer into fully connected layer, we need to flatten this output
                         outputs[i][-1] = flatten(outputs[i][-1])
+                    if layer_type == 'fc' and i == len(layers) - 1:
+                        # If FC and last layer, flatten (TODO check this with Atari Pong - does this break things?)
+                        outputs[i][-1] = flatten(outputs[i][-1])
         return outputs
 
     def load_output(self, output_name, output_info, inputs):

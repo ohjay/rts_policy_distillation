@@ -18,11 +18,11 @@ def land_dt(player, state, next_state, opponent_land_count):
         return np.count_nonzero(next_state['friendly'])
     return np.count_nonzero(next_state['friendly']) - np.count_nonzero(state['friendly'])
 
-def scaled_land_dt(player, state, next_state, opponent_land_count):
-    ns_friendly = np.count_nonzero(next_state['friendly'])
+def move_made(player, state, next_state, opponent_land_count):
+    """Assumes that the opponent is NOT making moves."""
     if state is None:
-        return ns_friendly
-    return (ns_friendly - np.count_nonzero(state['friendly'])) * ns_friendly
+        return 0.0
+    return 1.0 - int(np.array_equal(state['friendly'], next_state['friendly']))
 
 def win_loss(player, state, next_state, opponent_land_count):
     if not opponent_land_count:
@@ -31,14 +31,14 @@ def win_loss(player, state, next_state, opponent_land_count):
         return 0
 
 class Player(object):
-    def __init__(self, id_no, general_loc, reward_fn=land_dt):
+    def __init__(self, id_no, general_loc, reward_fn_name='land_dt'):
         self.id_no = id_no
         self.actions = queue.Queue()
         self.outputs = queue.Queue()
         self.rewards = queue.Queue()
         self.last_state = None
         self.last_location = general_loc
-        self.reward_fn = reward_fn
+        self.reward_fn = eval(reward_fn_name)
         self.general_loc = general_loc
         self.invalid_penalty = 0
 
@@ -61,9 +61,10 @@ class Player(object):
         self.last_location = location
 
 class Map(object):
-    def __init__(self):
+    def __init__(self, reward_fn_name=None):
         self.width = MAP_SIZE
         self.height = MAP_SIZE
+        self.reward_fn_name = reward_fn_name
 
         self.mountains = np.zeros((MAP_SIZE, MAP_SIZE))
         self.cities = np.zeros((MAP_SIZE, MAP_SIZE))
@@ -97,7 +98,10 @@ class Map(object):
         self.generals[pos[0], pos[1]] = 1
         self.owner[pos[0], pos[1]] = player_id
         self.armies[pos[0], pos[1]] = 1
-        self.players[player_id] = Player(player_id, pos)
+        if self.reward_fn_name is not None:
+            self.players[player_id] = Player(player_id, pos, self.reward_fn_name)
+        else:
+            self.players[player_id] = Player(player_id, pos)
         self.generals_list.append(pos)
 
     def update(self, fast_mode=False):

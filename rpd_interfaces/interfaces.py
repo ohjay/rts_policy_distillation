@@ -23,8 +23,8 @@ class Environment(object):
     def get_random_action(self, **kwargs):
         raise NotImplementedError('sample a random action from the environment')
 
-    def get_valid_action_from_q_values(self, q_values):
-        raise NotImplementedError('get a valid action from a collection of Q values')
+    def get_action_from_q_values(self, q_values, **kwargs):
+        raise NotImplementedError('get an action from a collection of Q values')
 
     def step(self, action, **kwargs):
         raise NotImplementedError('abstract method for taking action; returns (obs, reward, done) tuple')
