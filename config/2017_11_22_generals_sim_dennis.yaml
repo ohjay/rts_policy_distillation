@@ -6,7 +6,7 @@
 # --------
 
 env: generals_sim
-operation: train  # (train,)
+operation: train  # choices: (train,)
 
 train_params:
   random_seed: 0
@@ -38,7 +38,7 @@ generals_sim:
   map_player_count: 2
 
 reset_kwargs:
-  map_init: empty
+  map_init: empty  # choices: (empty, random)
   player_id: 1
 
 step_kwargs:

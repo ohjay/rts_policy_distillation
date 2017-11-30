@@ -172,7 +172,7 @@ class GeneralsEnv(Environment):
             (32, 32, 32, 255),      # 4 - Fog - Dark Grey
             (124, 124, 124, 255),   # 5 - Terrain Fog - Grey
             (0, 0, 255, 255),       # 6 - Blue player
-            (255, 0, 0, 255),        # 7 - Red player
+            (255, 0, 0, 255),       # 7 - Red player
             (0, 0, 100, 255)        # 8 - Blue player last location - Dark Blue
         ]
         dir = os.path.dirname(__file__)

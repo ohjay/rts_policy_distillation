@@ -125,14 +125,13 @@ class LinearSchedule(Schedule):
 
 class ReplayBuffer(object):
     def __init__(self, size, frame_history_len):
-        """This is a memory efficient implementation of the replay buffer.
+        """This is a memory-efficient implementation of the replay buffer.
 
         The specific memory optimizations use here are:
             - only store each frame once rather than k times
               even if every observation normally consists of k last frames
             - store frames as np.uint8 (actually it is most time-performance
-              to cast them back to float32 on GPU to minimize memory transfer
-              time)
+              to cast them back to float32 on GPU to minimize memory transfer time)
             - store frame_t and frame_(t+1) in the same buffer.
 
         For the typical use case in Atari Deep RL buffer with 1M frames the total

@@ -123,6 +123,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
     def _np_to_obs(obs_np, batched=False):
         """Separates observation into individual inputs (the {input_name: value} dict it was originally).
+        Note: it is possible that OBS_NP represents not a single observation, but an entire batch of observations.
+
         This the inverse of `_obs_to_np`.
         """
         input_names = sorted(arch['inputs'].keys())
@@ -133,12 +135,14 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             if encoding_option == 1:
                 return {input_names[0]: obs_np}
             elif encoding_option == 2:
-                individual = np.split(obs_np, obs_np.shape[0], axis=0)
+                axis = 1 if batched else 0
+                individual = np.split(obs_np, obs_np.shape[axis], axis=axis)
                 return {input_name: individual[i] for i, input_name in enumerate(input_names)}
             elif encoding_option == 3:
                 input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
                 split_indices = np.cumsum([_shape[_obs_encoding['axis']] for _shape in input_shapes])
-                individual = np.split(obs_np, split_indices, axis=_obs_encoding['axis'])
+                axis = _obs_encoding['axis'] + 1 if batched else _obs_encoding['axis']
+                individual = np.split(obs_np, split_indices, axis=axis)
                 return {input_name: individual[i] for i, input_name in enumerate(input_names)}
             # Encoding option #4 shall be handled below
         else:
@@ -153,7 +157,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 shape0 = input_shapes[0]
                 if all(_shape == shape0 for _shape in input_shapes[1:]):
                     _obs_encoding['encoding_option'] = 2
-                    individual = np.split(obs_np, obs_np.shape[0], axis=0)
+                    axis = 1 if batched else 0
+                    individual = np.split(obs_np, obs_np.shape[axis], axis=axis)
                     return {input_name: individual[i] for i, input_name in enumerate(input_names)}
 
                 # Inverse of (3)
@@ -163,7 +168,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                         _obs_encoding['encoding_option'] = 3
                         _obs_encoding['axis'] = dim
                         split_indices = np.cumsum([_shape[dim] for _shape in input_shapes])
-                        individual = np.split(obs_np, split_indices, axis=dim)
+                        axis = dim + 1 if batched else dim
+                        individual = np.split(obs_np, split_indices, axis=axis)
                         return {input_name: individual[i] for i, input_name in enumerate(input_names)}
 
         # Inverse of (4)
@@ -172,7 +178,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         for input_name in input_names:
             shape = arch['inputs'][input_name]['shape']
             size = functools.reduce(operator.mul, shape, 1)
-            if batched or obs_np.shape[0] == batch_size:
+            if batched:
                 shape = np.insert(shape, 0, obs_np.shape[0])
                 try:
                     obs[input_name] = np.reshape(obs_np[:, i:i+size], shape)
@@ -314,7 +320,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     run_dir = os.path.join('img', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
                     if not os.path.exists(run_dir):
                         os.makedirs(run_dir)
-                        print('Created directory at %s.' % run_dir)
+                        print('Created directory at %s.\n' % run_dir)
                     image.save("{}/Game_{}_Step_{}.png".format(run_dir, play_count, game_steps))
 
             if done:
@@ -341,8 +347,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             if t > learning_starts and t % learning_freq == 0 and replay_buffer.can_sample(batch_size):
                 # Use replay buffer to sample a batch of transitions
                 obs_batch_np, act_batch, rew_batch, next_obs_batch_np, done_mask = replay_buffer.sample(batch_size)
-                obs_batch = _np_to_obs(obs_batch_np)
-                next_obs_batch = _np_to_obs(next_obs_batch_np)
+                obs_batch = _np_to_obs(obs_batch_np, batched=True)
+                next_obs_batch = _np_to_obs(next_obs_batch_np, batched=True)
 
                 if normalize_inputs:
                     if not moments_initialized:
