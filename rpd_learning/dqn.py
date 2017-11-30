@@ -75,21 +75,61 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     arch = config['dqn_arch']
     output_names = sorted(arch['outputs'].keys(), key=lambda x: arch['outputs'][x].get('order', float('inf')))
 
-    # TODO: inspect this
     def _obs_to_np(obs):
         """Reformats observation as a single NumPy array.
         An observation, at least from the RPD interface, will be given as an {input_name: value} dict.
         """
-        return np.concatenate([obs[input_name].flatten() for input_name in sorted(arch['inputs'].keys())])
+        input_names = sorted(arch['inputs'].keys())
+        if len(input_names) == 1:
+            return obs[input_names[0]]  # if there is only one input, return as-is (1)
+        assert len(input_names) > 0, 'observations are required'
 
-    # TODO: inspect this
+        input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
+        num_dims0 = len(input_shapes[0])
+        if all(len(_shape) == num_dims0 for _shape in input_shapes[1:]):
+            # If it's possible to join the inputs along a new axis, do it (2)
+            shape0 = input_shapes[0]
+            if all(_shape == shape0 for _shape in input_shapes[1:]):
+                return np.stack([obs[input_name] for input_name in input_names], axis=0)
+
+            # If it's possible to join the inputs along an existing axis, do it (3)
+            for dim in range(num_dims0):
+                without_axis0 = shape0[:dim] + shape0[dim+1:]
+                if all(_shape[:dim] + _shape[dim+1:] == without_axis0 for _shape in input_shapes[1:]):
+                    return np.concatenate([obs[input_name] for input_name in input_names], axis=dim)
+
+        # Return a concatenation of flattened arrays (4)
+        return np.concatenate([obs[input_name].flatten() for input_name in input_names])
+
     def _np_to_obs(obs_np, batched=False):
         """Separates observation into individual inputs (the {input_name: value} dict it was originally).
         This the inverse of `_obs_to_np`.
         """
-        obs = {}
-        i = 0
-        for input_name in sorted(arch['inputs'].keys()):
+        input_names = sorted(arch['inputs'].keys())
+        if len(input_names) == 1:
+            return {input_names[0]: obs_np}  # inverse of (1)
+        assert len(input_names) > 0, 'observations are required'
+
+        input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
+        num_dims0 = len(input_shapes[0])
+        if all(len(_shape) == num_dims0 for _shape in input_shapes[1:]):
+            # Inverse of (2)
+            shape0 = input_shapes[0]
+            if all(_shape == shape0 for _shape in input_shapes[1:]):
+                individual = np.split(obs_np, obs_np.shape[0], axis=0)
+                return {input_name: individual[i] for i, input_name in enumerate(input_names)}
+
+            # Inverse of (3)
+            for dim in range(num_dims0):
+                without_axis0 = shape0[:dim] + shape0[dim + 1:]
+                if all(_shape[:dim] + _shape[dim + 1:] == without_axis0 for _shape in input_shapes[1:]):
+                    split_indices = np.cumsum([_shape[dim] for _shape in input_shapes])
+                    individual = np.split(obs_np, split_indices, axis=dim)
+                    return {input_name: individual[i] for i, input_name in enumerate(input_names)}
+
+        # Inverse of (4)
+        obs, i = {}, 0
+        for input_name in input_names:
             shape = arch['inputs'][input_name]['shape']
             size = functools.reduce(operator.mul, shape, 1)
             if batched or obs_np.shape[0] == batch_size:
@@ -144,7 +184,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         _num = arch['outputs'][output_name]['shape'][0]
         q_out = q_func.outputs[output_name]
         target_out = target_q_func.outputs[output_name]
-        all_q_j.append(tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1))  # TODO: encoded correctly via `tf.one_hot`?
+        all_q_j.append(tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1))
         all_y_j.append(rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1)))
 
     total_error = 0
