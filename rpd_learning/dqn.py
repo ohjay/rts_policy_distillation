@@ -318,9 +318,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     print_and_log('mean of recent rewards %.2f' % np.mean(last_episode_rewards))
                     print_and_log('recent rewards %r' % last_episode_rewards)
 
-                # Save network parameters and images from next episode
-                q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
-                target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))  # don't need both?
+                if train_params.get('save_model', True):
+                    # Save network parameters and images from next episode
+                    q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
+                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))  # don't need both?
                 save_images = train_params.get('save_images', True)
 
                 print_and_log('')  # newline

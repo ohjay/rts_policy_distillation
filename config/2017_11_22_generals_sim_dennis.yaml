@@ -19,6 +19,15 @@ train_params:
   frame_history_len: 1
   target_update_freq: 10000
   grad_norm_clipping: 10
+  lr_schedule:  # can use any variables defined in `main.train`
+    - 0: 1e-4 * lr_multiplier
+    - num_iterations / 10: 1e-4 * lr_multiplier
+    - num_iterations / 2: 5e-5 * lr_multiplier
+  exploration_schedule:
+    - 0: 0.80
+    - 5e6: 0.20
+    - num_iterations / 2: 0.10
+    - num_iterations: 0.01
 
 # ENV-SPECIFIC INFO
 # ------------------
