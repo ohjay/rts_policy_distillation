@@ -10,7 +10,7 @@ import tensorflow as tf
 from rpd_learning.dqn_utils import PiecewiseSchedule
 from rpd_learning import dqn
 
-SUPPORTED_ENVS = {'generals', 'generals_sim', 'atari_pong_ram'}
+SUPPORTED_ENVS = {'generals', 'generals_sim', 'atari_pong', 'atari_pong_ram'}
 SUPPORTED_OPS = {'train'}
 
 def get_available_gpus():
@@ -41,32 +41,44 @@ def train(env, config):
     num_timesteps = train_params.get('num_timesteps', int(4e7))
     num_iterations = float(num_timesteps) / 4.0
 
-    # TODO: configure learning rate and exploration somewhere else
+    def _process_endpoints(endpoints, _locals=None):
+        """Convert ENDPOINTS into the format required for a PiecewiseSchedule.
+        Turn a list of single-element {t: value} dictionaries (sorted by t) into a list of (t, value) tuples.
+        """
+        if _locals is None:
+            _locals = globals()
+        processed_endpoints = []
+        for e in endpoints:
+            t, value = e.keys()[0], e.values()[0]
+            processed_endpoints.append((
+                eval(t, globals(), _locals) if type(t) == str else t,
+                eval(value, globals(), _locals) if type(value) == str else value
+            ))
+        return processed_endpoints
 
-    lr_multiplier = 10.0
-    lr_schedule = PiecewiseSchedule([
-        (0,                   1e-4 * lr_multiplier),
-        (num_iterations / 10, 1e-4 * lr_multiplier),
-        (num_iterations / 2,  5e-5 * lr_multiplier),
-    ], outside_value=5e-5 * lr_multiplier)
+    lr_multiplier = train_params.get('lr_multiplier', 1.0)
+    lr_endpoints = train_params.get('lr_schedule', [
+        {0:                   1e-4 * lr_multiplier},
+        {num_iterations / 10: 1e-4 * lr_multiplier},
+        {num_iterations / 2:  5e-5 * lr_multiplier},
+    ])
+    print('Loaded learning rate schedule as %r.' % lr_endpoints)
+    lr_endpoints = _process_endpoints(lr_endpoints, locals())
+    lr_schedule = PiecewiseSchedule(lr_endpoints, outside_value=lr_endpoints[-1][1])
     optimizer = dqn.OptimizerSpec(
         constructor=tf.train.AdamOptimizer, kwargs=dict(epsilon=1e-4), lr_schedule=lr_schedule)
 
     def stopping_criterion(env, t):
-        return t > 8e7  # TODO idk
+        return t > num_timesteps * 2
 
-    # exploration_schedule = PiecewiseSchedule([
-    #     (0,   1.00),
-    #     (5e5, 0.30),
-    #     (8e5, 0.10),
-    #     (1e6, 0.01)
-    # ], outside_value=0.01)
-
-    exploration_schedule = PiecewiseSchedule([
-        (0,                  0.20),
-        (1e6,                0.10),
-        (num_iterations / 2, 0.01),
-    ], outside_value=0.01)
+    exploration_endpoints = train_params.get('exploration_schedule', [
+        {0:                  1.00},
+        {1e6:                0.10},
+        {num_iterations / 2: 0.01}
+    ])
+    print('Loaded exploration schedule as %r.' % exploration_endpoints)
+    exploration_endpoints = _process_endpoints(exploration_endpoints, locals())
+    exploration_schedule = PiecewiseSchedule(exploration_endpoints, outside_value=exploration_endpoints[-1][1])
 
     learn_params = {p: train_params[p] for p in {
         'replay_buffer_size', 'batch_size', 'gamma', 'learning_starts', 'learning_freq', 'frame_history_len',
@@ -81,8 +93,7 @@ def train(env, config):
         env.close()
 
 def test(env, config):
-    for update in env.get_updates():
-        observation = env.extract_observation(update)
+    pass  # TODO add evaluation code
 
 def run(config):
     """Run RPD code according to the passed-in config file."""
@@ -98,7 +109,7 @@ def run(config):
     elif config['env'] == 'generals_sim':
         from rpd_interfaces.generals import generals_sim
         env = generals_sim.GeneralsEnv('replays_prod/')
-    elif config['env'].startswith('atari_pong_ram'):
+    elif config['env'].startswith('atari_pong'):
         from rpd_interfaces.atari import atari
         env = atari.AtariEnv(config['env'])
 

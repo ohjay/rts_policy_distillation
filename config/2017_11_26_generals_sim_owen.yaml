@@ -11,6 +11,7 @@ operation: train  # (train,)
 train_params:
   random_seed: 0
   num_timesteps: 40000000
+  lr_multiplier: 1.0
   replay_buffer_size: 1000000
   batch_size: 32
   gamma: 0.5
@@ -19,7 +20,16 @@ train_params:
   frame_history_len: 1
   target_update_freq: 10000
   grad_norm_clipping: 10
-  exploration_schedule: [(0, 1.00), (5e5, 0.30), (8e5, 0.10), (1e6, 0.01)]
+  lr_schedule:  # can use any variables defined in `main.train`
+    - 0: 1e-4 * lr_multiplier
+    - num_iterations / 10: 1e-4 * lr_multiplier
+    - num_iterations / 2: 5e-5 * lr_multiplier
+  exploration_schedule:
+    - 0: 1.00
+    - 5e5: 0.30
+    - 8e5: 0.10
+    - 1e6: 0.01
+  log_freq: 150  # log every X episodes
 
 # ENV-SPECIFIC INFO
 # ------------------

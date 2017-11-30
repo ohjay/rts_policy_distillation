@@ -17,7 +17,7 @@ def merge_dicts(*args):
     return z
 
 def sample_n_unique(sampling_f, n):
-    """Helper function. Given a function `sampling_f` that returns
+    """Helper function. Given a function SAMPLING_F that returns
     comparable objects, sample n such unique objects.
     """
     res = []
@@ -31,9 +31,8 @@ def linear_interpolation(l, r, alpha):
     return l + alpha * (r - l)
 
 def minimize_and_clip(optimizer, objective, var_list, clip_val=10):
-    """Minimized `objective` using `optimizer` w.r.t. variables in
-    `var_list` while ensure the norm of the gradients for each
-    variable is clipped to `clip_val`
+    """Minimize OBJECTIVE using OPTIMIZER w.r.t. variables in VAR_LIST,
+    while ensuring that the norm of the gradients for each variable is clipped to CLIP_VAL.
     """
     gradients = optimizer.compute_gradients(objective, var_list=var_list)
     for i, (grad, var) in enumerate(gradients):
@@ -50,8 +49,6 @@ def initialize_interdependent_variables(session, vars_list, feed_dict):
         new_vars_left = []
         for v in vars_left:
             try:
-                # If using an older version of TensorFlow, uncomment the line
-                # below and comment out the line after it.
                 session.run(tf.variables_initializer([v]), feed_dict)
             except tf.errors.FailedPreconditionError:
                 new_vars_left.append(v)
@@ -91,12 +88,12 @@ class PiecewiseSchedule(Schedule):
         assert idxes == sorted(idxes)
         self._interpolation = interpolation
         self._outside_value = outside_value
-        self._endpoints      = endpoints
+        self._endpoints = endpoints
 
     def value(self, t):
         """Value of the schedule at time t."""
         for (l_t, l), (r_t, r) in zip(self._endpoints[:-1], self._endpoints[1:]):
-            if l_t <= t and t < r_t:
+            if l_t <= t < r_t:
                 alpha = float(t - l_t) / (r_t - l_t)
                 return self._interpolation(l, r, alpha)
 
@@ -123,7 +120,7 @@ class LinearSchedule(Schedule):
 
     def value(self, t):
         """Value of the schedule at time t."""
-        fraction  = min(float(t) / self.schedule_timesteps, 1.0)
+        fraction = min(float(t) / self.schedule_timesteps, 1.0)
         return self.initial_p + fraction * (self.final_p - self.initial_p)
 
 class ReplayBuffer(object):
@@ -159,10 +156,10 @@ class ReplayBuffer(object):
         self.next_idx      = 0
         self.num_in_buffer = 0
 
-        self.obs      = None
-        self.action   = None
-        self.reward   = None
-        self.done     = None
+        self.obs    = None
+        self.action = None
+        self.reward = None
+        self.done   = None
 
     def can_sample(self, batch_size):
         """Returns true if `batch_size` different transitions can be sampled from the buffer."""
@@ -177,7 +174,7 @@ class ReplayBuffer(object):
 
         return obs_batch, act_batch, rew_batch, next_obs_batch, done_mask
 
-
+    # TODO: inspect dimensions and dtypes
     def sample(self, batch_size):
         """Sample `batch_size` different transitions.
 
@@ -221,48 +218,38 @@ class ReplayBuffer(object):
         Returns
         -------
         observation: np.array
-            Array of shape (img_h, img_w, img_c * frame_history_len)
-            and dtype np.uint8, where observation[:, :, i*img_c:(i+1)*img_c]
-            encodes frame at time `t - frame_history_len + i`
+            The last `frame_history_len` frames as a single array,
+            where the frames are concatenated over the final axis.
         """
         assert self.num_in_buffer > 0
         return self._encode_observation((self.next_idx - 1) % self.size)
 
+    # TODO: inspect this
     def _encode_observation(self, idx):
-        end_idx   = idx + 1 # make noninclusive
+        end_idx = idx + 1  # make noninclusive
         start_idx = end_idx - self.frame_history_len
-        # this checks if we are using low-dimensional observations, such as RAM
-        # state, in which case we just directly return the latest RAM.
-        if len(self.obs.shape) == 2:
-            return self.obs[end_idx-1]
-        # if there weren't enough frames ever in the buffer for context
+
+        # If there aren't enough frames in the buffer for context
         if start_idx < 0 and self.num_in_buffer != self.size:
             start_idx = 0
         for idx in range(start_idx, end_idx - 1):
             if self.done[idx % self.size]:
                 start_idx = idx + 1
         missing_context = self.frame_history_len - (end_idx - start_idx)
-        # if zero padding is needed for missing context
-        # or we are on the boundary of the buffer
-        if start_idx < 0 or missing_context > 0:
-            frames = [np.zeros_like(self.obs[0]) for _ in range(missing_context)]
-            for idx in range(start_idx, end_idx):
-                frames.append(self.obs[idx % self.size])
-            return np.concatenate(frames, 2)
-        else:
-            # this optimization has potential to saves about 30% compute time \o/
-            img_h, img_w = self.obs.shape[1], self.obs.shape[2]
-            return self.obs[start_idx:end_idx].transpose(1, 2, 0, 3).reshape(img_h, img_w, -1)
+
+        frames = [np.zeros_like(self.obs[0]) for _ in range(missing_context)]
+        for idx in range(start_idx, end_idx):
+            frames.append(self.obs[idx % self.size])
+        return np.concatenate(frames, axis=-1)
 
     def store_frame(self, frame):
-        """Store a single frame in the buffer at the next available index, overwriting
-        old frames if necessary.
+        """Store a single frame in the buffer at the next available index,
+        overwriting old frames if necessary.
 
         Parameters
         ----------
         frame: np.array
-            Array of shape (img_h, img_w, img_c) and dtype np.uint8
-            the frame to be stored
+            The frame to be stored; assumed to be of dtype np.uint8
 
         Returns
         -------
@@ -270,7 +257,7 @@ class ReplayBuffer(object):
             Index at which the frame is stored. To be used for `store_effect` later.
         """
         if self.obs is None:
-            self.obs      = np.empty([self.size] + list(frame.shape), dtype=np.uint8)
+            self.obs = np.empty([self.size] + list(frame.shape), dtype=np.uint8)  # TODO: don't restrict to uint8
             
         self.obs[self.next_idx] = frame
 
@@ -281,16 +268,15 @@ class ReplayBuffer(object):
         return ret
 
     def store_effect(self, idx, action, reward, done):
-        """Store effects of action taken after observing frame stored
-        at index idx. The reason `store_frame` and `store_effect` is broken
-        up into two functions is so that once can call `encode_recent_observation`
-        in between.
+        """Store effects of action taken after observing frame stored at index idx.
+        The reason `store_frame` and `store_effect` are broken up into two functions
+        is so that one can call `encode_recent_observation` in between.
 
         Parameters
         ---------
         idx: int
             Index in buffer of recently observed frame (returned by `store_frame`).
-        action: int
+        action: np.array
             Action that was performed upon observing this frame.
         reward: float
             Reward that was received when the actions was performed.
@@ -298,9 +284,9 @@ class ReplayBuffer(object):
             True if episode was finished after performing that action.
         """
         if self.action is None:
-            self.action   = np.empty([self.size] + list(action.shape),dtype=np.int32)
-            self.reward   = np.empty([self.size],                     dtype=np.float32)
-            self.done     = np.empty([self.size],                     dtype=np.bool)
+            self.action = np.empty([self.size] + list(action.shape), dtype=np.int32)
+            self.reward = np.empty([self.size],                      dtype=np.float32)
+            self.done   = np.empty([self.size],                      dtype=np.bool)
 
         self.action[idx] = action
         self.reward[idx] = reward
