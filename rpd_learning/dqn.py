@@ -75,14 +75,30 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     arch = config['dqn_arch']
     output_names = sorted(arch['outputs'].keys(), key=lambda x: arch['outputs'][x].get('order', float('inf')))
 
+    _obs_encoding = {}  # information to be filled in about the encoding, so we don't have to determine it every time
+
     def _obs_to_np(obs):
         """Reformats observation as a single NumPy array.
         An observation, at least from the RPD interface, will be given as an {input_name: value} dict.
         """
         input_names = sorted(arch['inputs'].keys())
-        if len(input_names) == 1:
-            return obs[input_names[0]]  # if there is only one input, return as-is (1)
         assert len(input_names) > 0, 'observations are required'
+
+        if 'encoding_option' in _obs_encoding:
+            # Expedited route (don't need to run as many condition tests)
+            encoding_option = _obs_encoding['encoding_option']
+            if encoding_option == 1:
+                return obs[input_names[0]]
+            elif encoding_option == 2:
+                return np.stack([obs[input_name] for input_name in input_names], axis=0)
+            elif encoding_option == 3:
+                return np.concatenate([obs[input_name] for input_name in input_names], axis=_obs_encoding['axis'])
+            elif encoding_option == 4:
+                return np.concatenate([obs[input_name].flatten() for input_name in input_names])
+
+        if len(input_names) == 1:
+            _obs_encoding['encoding_option'] = 1
+            return obs[input_names[0]]  # if there is only one input, return as-is (1)
 
         input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
         num_dims0 = len(input_shapes[0])
@@ -90,15 +106,19 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             # If it's possible to join the inputs along a new axis, do it (2)
             shape0 = input_shapes[0]
             if all(_shape == shape0 for _shape in input_shapes[1:]):
+                _obs_encoding['encoding_option'] = 2
                 return np.stack([obs[input_name] for input_name in input_names], axis=0)
 
             # If it's possible to join the inputs along an existing axis, do it (3)
             for dim in range(num_dims0):
                 without_axis0 = shape0[:dim] + shape0[dim+1:]
                 if all(_shape[:dim] + _shape[dim+1:] == without_axis0 for _shape in input_shapes[1:]):
+                    _obs_encoding['encoding_option'] = 3
+                    _obs_encoding['axis'] = dim
                     return np.concatenate([obs[input_name] for input_name in input_names], axis=dim)
 
         # Return a concatenation of flattened arrays (4)
+        _obs_encoding['encoding_option'] = 4
         return np.concatenate([obs[input_name].flatten() for input_name in input_names])
 
     def _np_to_obs(obs_np, batched=False):
@@ -106,28 +126,48 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         This the inverse of `_obs_to_np`.
         """
         input_names = sorted(arch['inputs'].keys())
-        if len(input_names) == 1:
-            return {input_names[0]: obs_np}  # inverse of (1)
         assert len(input_names) > 0, 'observations are required'
 
-        input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
-        num_dims0 = len(input_shapes[0])
-        if all(len(_shape) == num_dims0 for _shape in input_shapes[1:]):
-            # Inverse of (2)
-            shape0 = input_shapes[0]
-            if all(_shape == shape0 for _shape in input_shapes[1:]):
+        if 'encoding_option' in _obs_encoding:
+            encoding_option = _obs_encoding['encoding_option']
+            if encoding_option == 1:
+                return {input_names[0]: obs_np}
+            elif encoding_option == 2:
                 individual = np.split(obs_np, obs_np.shape[0], axis=0)
                 return {input_name: individual[i] for i, input_name in enumerate(input_names)}
+            elif encoding_option == 3:
+                input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
+                split_indices = np.cumsum([_shape[_obs_encoding['axis']] for _shape in input_shapes])
+                individual = np.split(obs_np, split_indices, axis=_obs_encoding['axis'])
+                return {input_name: individual[i] for i, input_name in enumerate(input_names)}
+            # Encoding option #4 shall be handled below
+        else:
+            if len(input_names) == 1:
+                _obs_encoding['encoding_option'] = 1
+                return {input_names[0]: obs_np}  # inverse of (1)
 
-            # Inverse of (3)
-            for dim in range(num_dims0):
-                without_axis0 = shape0[:dim] + shape0[dim + 1:]
-                if all(_shape[:dim] + _shape[dim + 1:] == without_axis0 for _shape in input_shapes[1:]):
-                    split_indices = np.cumsum([_shape[dim] for _shape in input_shapes])
-                    individual = np.split(obs_np, split_indices, axis=dim)
+            input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
+            num_dims0 = len(input_shapes[0])
+            if all(len(_shape) == num_dims0 for _shape in input_shapes[1:]):
+                # Inverse of (2)
+                shape0 = input_shapes[0]
+                if all(_shape == shape0 for _shape in input_shapes[1:]):
+                    _obs_encoding['encoding_option'] = 2
+                    individual = np.split(obs_np, obs_np.shape[0], axis=0)
                     return {input_name: individual[i] for i, input_name in enumerate(input_names)}
 
+                # Inverse of (3)
+                for dim in range(num_dims0):
+                    without_axis0 = shape0[:dim] + shape0[dim + 1:]
+                    if all(_shape[:dim] + _shape[dim + 1:] == without_axis0 for _shape in input_shapes[1:]):
+                        _obs_encoding['encoding_option'] = 3
+                        _obs_encoding['axis'] = dim
+                        split_indices = np.cumsum([_shape[dim] for _shape in input_shapes])
+                        individual = np.split(obs_np, split_indices, axis=dim)
+                        return {input_name: individual[i] for i, input_name in enumerate(input_names)}
+
         # Inverse of (4)
+        _obs_encoding['encoding_option'] = 4
         obs, i = {}, 0
         for input_name in input_names:
             shape = arch['inputs'][input_name]['shape']
