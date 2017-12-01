@@ -25,7 +25,7 @@ train_params:
     - num_iterations / 10: 1e-4 * lr_multiplier
     - num_iterations / 2: 5e-5 * lr_multiplier
   exploration_schedule:
-    - 0: 1.00
+    - 0: 0.80
     - 1e6: 0.10
     - num_iterations / 2: 0.01
   normalize_inputs: False
@@ -33,6 +33,9 @@ train_params:
   log_recent_rewards: True
   save_model: False
   save_images: True
+  restore_from:  # TODO (currently not used)
+    run_dir: run_11-30__20_35
+    checkpoint: 50000
 
 # ENV-SPECIFIC INFO
 # ------------------
@@ -45,15 +48,19 @@ generals_sim:
 reset_kwargs:
   map_init: empty  # choices: (empty, random)
   player_id: 1
+  preprocessors:  # choice of preprocessors from `generals_sim.py`
+    - add_dimension
 
 step_kwargs:
   player_id: 1
+  preprocessors:
+    - add_dimension
 
 get_action_kwargs:
   ensure_valid: False  # ensure that Q values produce a VALID action?
 
 get_random_kwargs:
-  semi_valid: False  # choose a random action that is guaranteed to "probably" be valid?
+  semi_valid: True  # choose a random action that is guaranteed to "probably" be valid?
   player_id: 1
 
 # MODEL ARCHITECTURE
@@ -75,7 +82,7 @@ dqn_arch:
 #      shape: [18, 18]
     friendly:
       dtype: uint8
-      shape: [18, 18]
+      shape: [18, 18, 1]
 #    enemy:
 #      dtype: uint8
 #      shape: [18, 18]
@@ -85,14 +92,23 @@ dqn_arch:
 
   layers:
     - inputs: [friendly]
-      type: fc
-      num_outputs: 256
+      type: conv2d
+      num_outputs: 32
+      kernel_size: 8
+      stride: 4
       activation: relu
-    - type: fc
-      num_outputs: 128
-      activation: relu
-    - type: fc
+    - type: conv2d
       num_outputs: 64
+      kernel_size: 4
+      stride: 2
+      activation: relu
+    - type: conv2d
+      num_outputs: 64
+      kernel_size: 3
+      stride: 1
+      activation: relu
+    - type: fc
+      num_outputs: 512
       activation: relu
 
   outputs:

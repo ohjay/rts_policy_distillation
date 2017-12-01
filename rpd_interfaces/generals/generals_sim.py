@@ -15,6 +15,17 @@ from PIL import Image, ImageDraw, ImageFont
 from rpd_interfaces.generals.simulator import *
 from rpd_interfaces.interfaces import Environment
 
+
+# Preprocessors
+# -------------
+def add_dimension(obs):
+    if obs is not None:
+        for _name in ('mountains', 'generals', 'hidden_terrain', 'fog',
+                      'friendly', 'enemy', 'cities', 'opp_land', 'opp_army'):
+            obs[_name] = obs[_name][..., None]
+    return obs
+
+
 class GeneralsEnv(Environment):
     def __init__(self, root_dir, reward_fn_name=None):
         listdir = os.listdir(root_dir)
@@ -22,7 +33,7 @@ class GeneralsEnv(Environment):
         self.map = None
         self.reward_fn_name = reward_fn_name
 
-    def reset(self, map_init='random', player_id=1):
+    def reset(self, map_init='random', player_id=1, preprocessors=()):
         """Sets the map using a random replay"""
         if map_init.lower() == 'empty':
             self.map = self._get_random_map(include_mountains=False, include_cities=False)
@@ -31,9 +42,12 @@ class GeneralsEnv(Environment):
         else:
             raise NotImplementedError('map init "%s" not supported' % map_init)
         self.map.update()
-        return self.map.players[player_id].get_output()
+        out = self.map.players[player_id].get_output()
+        for prep in preprocessors:
+            out = (eval(prep)(out[0]),) + out[1:]
+        return out
 
-    def step(self, action1, action2=None, player_id=1):
+    def step(self, action1, action2=None, player_id=1, preprocessors=()):
         """Takes two tuples of (x, y, dir).
         Action 1 is for player 1, 2 is for player 2
         Returns: (state1, reward1, dead1), (state2, reward2, dead2)
@@ -48,10 +62,15 @@ class GeneralsEnv(Environment):
         out2 = None
         if action2:
             out2 = self.map.players[2].get_output()
+        for prep in preprocessors:
+            _prep = eval(prep)
+            out1 = (_prep(out1[0]),) + out1[1:]
+            if out2 is not None:
+                out2 = (_prep(out2[0]),) + out2[1:]
         return out1 if player_id == 1 else out2
 
-    def step_simple(self, action1, action2=None, player_id=1):
-        """Takes two directions, and moves each agent in the corresponding direction"""
+    def step_simple(self, action1, action2=None, player_id=1, preprocessors=()):
+        """Takes two directions, and moves each agent in the corresponding direction."""
         self.map.action_simple(1, self._get_movement_for_action((0, 0), action1))
         if action2:
             self.map.action_simple(2, self._get_movement_for_action((0, 0), action2))
@@ -60,6 +79,11 @@ class GeneralsEnv(Environment):
         out2 = None
         if action2:
             out2 = self.map.players[2].get_output()
+        for prep in preprocessors:
+            _prep = eval(prep)
+            out1 = (_prep(out1[0]),) + out1[1:]
+            if out2 is not None:
+                out2 = (_prep(out2[0]),) + out2[1:]
         return out1 if player_id == 1 else out2
 
     def _get_movement_for_action(self, initial, direction):

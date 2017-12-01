@@ -12,16 +12,18 @@ import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected, convolution2d, flatten, batch_norm
 
 class Model(object):
+    curr_index = -1
+
     def __init__(self, arch, inputs=None, scope=None, reuse=False):
         self.inputs = inputs if type(inputs) == dict else {}
         self.outputs, self.labels = {}, {}
         self.losses, self.optimize = {}, {}
 
         # Construct the actual graph
-        if scope is not None:
-            with tf.variable_scope(scope, reuse=reuse):
-                self.load_arch(arch)
-        else:
+        if scope is None:
+            Model.curr_index += 1
+        self.scope = scope or 'Model_%d' % Model.curr_index
+        with tf.variable_scope(self.scope, reuse=reuse):
             self.load_arch(arch)
 
     def load_arch(self, arch):
@@ -144,17 +146,17 @@ class Model(object):
             return tf.reduce_mean(tf.squared_difference(outputs, labels))
         raise NotImplementedError
 
-    @staticmethod
-    def save(sess, iteration, outfolder='out', write_meta_graph=True):
+    def save(self, sess, iteration, outfolder='out', write_meta_graph=True):
+        """Save the model's variables (as they exist in the current session) to a checkpoint file in OUTFOLDER."""
         if not os.path.exists(outfolder):
             os.makedirs(outfolder)
         base_filepath = os.path.join(outfolder, 'var')
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.scope))
         saver.save(sess, base_filepath, global_step=iteration, write_meta_graph=write_meta_graph)
         print('[+] Saved current parameters to %s-%d.index.' % (base_filepath, iteration))
 
-    @staticmethod
-    def restore(sess, iteration, outfolder='out'):
-        saver = tf.train.Saver()
+    def restore(self, sess, iteration, outfolder='out'):
+        """Restore the model's variables from a checkpoint file in OUTFOLDER."""
+        saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.scope))
         saver.restore(sess, os.path.join(outfolder, 'var-%d' % iteration))
         print('[+] Model restored to iteration %d (outfolder=%s).' % (iteration, outfolder))

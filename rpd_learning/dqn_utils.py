@@ -241,14 +241,16 @@ class ReplayBuffer(object):
             frames.append(self.obs[idx % self.size])
         return np.concatenate(frames, axis=-1)
 
-    def store_frame(self, frame):
+    def store_frame(self, frame, dtype='uint8'):
         """Store a single frame in the buffer at the next available index,
         overwriting old frames if necessary.
 
         Parameters
         ----------
         frame: np.array
-            The frame to be stored; assumed to be of dtype np.uint8
+            The frame to be stored.
+        dtype: str
+            Data type for frames (i.e. observations).
 
         Returns
         -------
@@ -256,7 +258,7 @@ class ReplayBuffer(object):
             Index at which the frame is stored. To be used for `store_effect` later.
         """
         if self.obs is None:
-            self.obs = np.empty([self.size] + list(frame.shape), dtype=np.uint8)  # TODO: don't restrict to uint8
+            self.obs = np.empty([self.size] + list(frame.shape), dtype=getattr(np, dtype))
             
         self.obs[self.next_idx] = frame
 

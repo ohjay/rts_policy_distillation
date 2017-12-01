@@ -16,6 +16,7 @@ from collections import namedtuple
 
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
+from rpd_learning.general_utils import rm_rf, dominant_dtype
 import random
 
 
@@ -64,7 +65,11 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
     # Set up checkpoint folder
     checkpoint_dir = os.path.join('.checkpoints', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
-    os.makedirs(checkpoint_dir)
+    try:
+        os.makedirs(checkpoint_dir)
+    except OSError:
+        rm_rf(checkpoint_dir, 'ERROR: %s already exists! Delete this folder? (True/False)' % checkpoint_dir)
+        os.makedirs(checkpoint_dir)
     with open(os.path.join(checkpoint_dir, 'config_in.yaml'), 'w') as outfile:
         yaml.dump(config, outfile, default_flow_style=False)  # save the config as backup
 
@@ -73,17 +78,21 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     ###############
 
     arch = config['dqn_arch']
+    input_names = sorted(arch['inputs'].keys())
+    assert len(input_names) > 0, 'observations are required'
+    input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
+    input_dtypes = [arch['inputs'][input_name]['dtype'] for input_name in input_names]
+    if len(set(input_dtypes)) > 1:
+        print('Warning: you have inputs of different data types. You might want to keep them all the same.')
     output_names = sorted(arch['outputs'].keys(), key=lambda x: arch['outputs'][x].get('order', float('inf')))
 
     _obs_encoding = {}  # information to be filled in about the encoding, so we don't have to determine it every time
+    _obs_encoding_dtype = dominant_dtype(input_dtypes)
 
     def _obs_to_np(obs):
         """Reformats observation as a single NumPy array.
         An observation, at least from the RPD interface, will be given as an {input_name: value} dict.
         """
-        input_names = sorted(arch['inputs'].keys())
-        assert len(input_names) > 0, 'observations are required'
-
         if 'encoding_option' in _obs_encoding:
             # Expedited route (don't need to run as many condition tests)
             encoding_option = _obs_encoding['encoding_option']
@@ -100,7 +109,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             _obs_encoding['encoding_option'] = 1
             return obs[input_names[0]]  # if there is only one input, return as-is (1)
 
-        input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
         num_dims0 = len(input_shapes[0])
         if all(len(_shape) == num_dims0 for _shape in input_shapes[1:]):
             # If it's possible to join the inputs along a new axis, do it (2)
@@ -127,9 +135,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
         This the inverse of `_obs_to_np`.
         """
-        input_names = sorted(arch['inputs'].keys())
-        assert len(input_names) > 0, 'observations are required'
-
         if 'encoding_option' in _obs_encoding:
             encoding_option = _obs_encoding['encoding_option']
             if encoding_option == 1:
@@ -139,7 +144,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 individual = np.split(obs_np, obs_np.shape[axis], axis=axis)
                 return {input_name: individual[i] for i, input_name in enumerate(input_names)}
             elif encoding_option == 3:
-                input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
                 split_indices = np.cumsum([_shape[_obs_encoding['axis']] for _shape in input_shapes])
                 axis = _obs_encoding['axis'] + 1 if batched else _obs_encoding['axis']
                 individual = np.split(obs_np, split_indices, axis=axis)
@@ -150,7 +154,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 _obs_encoding['encoding_option'] = 1
                 return {input_names[0]: obs_np}  # inverse of (1)
 
-            input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
             num_dims0 = len(input_shapes[0])
             if all(len(_shape) == num_dims0 for _shape in input_shapes[1:]):
                 # Inverse of (2)
@@ -176,47 +179,38 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         _obs_encoding['encoding_option'] = 4
         obs, i = {}, 0
         for input_name in input_names:
-            shape = arch['inputs'][input_name]['shape']
-            size = functools.reduce(operator.mul, shape, 1)
+            _shape = arch['inputs'][input_name]['shape']
+            size = functools.reduce(operator.mul, _shape, 1)
             if batched:
-                shape = np.insert(shape, 0, obs_np.shape[0])
+                _shape = np.insert(_shape, 0, obs_np.shape[0])
                 try:
-                    obs[input_name] = np.reshape(obs_np[:, i:i+size], shape)
+                    obs[input_name] = np.reshape(obs_np[:, i:i+size], _shape)
                 except ValueError as e:
                     print('i: %d' % i)
                     print('obs_np shape: %r' % (obs_np.shape,))
-                    print('shape, size: %r, %d' % (shape, size))
+                    print('shape, size: %r, %d' % (_shape, size))
                     raise
             else:
-                obs[input_name] = np.reshape(obs_np[i:i+size], shape)
+                obs[input_name] = np.reshape(obs_np[i:i+size], _shape)
             i += size
         return obs
 
     # Set up placeholders
-    obs_t_ph = {input_name: None for input_name in arch['inputs'].keys()}  # current observation (or state)
-    obs_t_ph_float = {input_name: None for input_name in arch['inputs'].keys()}
-    for input_name in obs_t_ph:
-        info = arch['inputs'][input_name]
-        dtype, shape = info['dtype'], info['shape']
+    obs_t_ph = {input_name: None for input_name in input_names}  # current observation (or state)
+    obs_t_ph_float = {input_name: None for input_name in input_names}
+    obs_tp1_ph = {input_name: None for input_name in input_names}  # next observation (or state)
+    obs_tp1_ph_float = {input_name: None for input_name in input_names}
+    for input_name, dtype, shape in zip(input_names, input_dtypes, input_shapes):
         obs_t_ph[input_name] = tf.placeholder(getattr(tf, dtype), [None] + list(shape))
-        if dtype == 'float32':
-            obs_t_ph_float[input_name] = obs_t_ph[input_name]
-        else:  # casting to float on GPU ensures lower data transfer times
-            obs_t_ph_float[input_name] = tf.cast(obs_t_ph[input_name], tf.float32) / 255.0
-    act_t_ph = {}
-    for output_name in output_names:
-        act_t_ph[output_name] = tf.placeholder(tf.int32, [None])  # current action
-    rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
-    obs_tp1_ph = {input_name: None for input_name in arch['inputs'].keys()}  # next observation (or state)
-    obs_tp1_ph_float = {input_name: None for input_name in arch['inputs'].keys()}
-    for input_name in obs_tp1_ph:
-        info = arch['inputs'][input_name]
-        dtype, shape = info['dtype'], info['shape']
         obs_tp1_ph[input_name] = tf.placeholder(getattr(tf, dtype), [None] + list(shape))
         if dtype == 'float32':
+            obs_t_ph_float[input_name] = obs_t_ph[input_name]
             obs_tp1_ph_float[input_name] = obs_tp1_ph[input_name]
-        else:
+        else:  # casting to float on GPU ensures lower data transfer times
+            obs_t_ph_float[input_name] = tf.cast(obs_t_ph[input_name], tf.float32) / 255.0
             obs_tp1_ph_float[input_name] = tf.cast(obs_tp1_ph[input_name], tf.float32) / 255.0
+    act_t_ph = {output_name: tf.placeholder(tf.int32, [None]) for output_name in output_names}  # current action
+    rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
     done_mask_ph = tf.placeholder(tf.float32, [None])  # end of episode mask (1 if next state = end of an episode)
 
     # Create networks (for current/next Q-values)
@@ -294,7 +288,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 break
 
             # Step the env and store the transition in the replay buffer
-            idx = replay_buffer.store_frame(last_obs_np)
+            idx = replay_buffer.store_frame(last_obs_np, dtype=_obs_encoding_dtype)
 
             # Choose action via epsilon greedy exploration
             eps = exploration.value(t)
@@ -406,10 +400,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     print_and_log('mean of recent rewards %.2f' % np.mean(last_episode_rewards))
                     print_and_log('recent rewards %r' % last_episode_rewards)
 
+                # Save network parameters and images from next episode
                 if train_params.get('save_model', True):
-                    # Save network parameters and images from next episode
                     q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
-                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))  # both required?
+                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))
                 save_images = train_params.get('save_images', True)
 
                 print_and_log('')  # newline
