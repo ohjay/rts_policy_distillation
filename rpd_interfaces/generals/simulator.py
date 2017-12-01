@@ -22,7 +22,7 @@ def move_made(player, state, next_state, opponent_land_count):
     """Assumes that the opponent is NOT making moves."""
     if state is None:
         return 0.0
-    return 1.0 - int(np.array_equal(state['friendly'], next_state['friendly']))
+    return int(state['last_location'] != next_state['last_location'])
 
 def win_loss(player, state, next_state, opponent_land_count):
     if not opponent_land_count:
@@ -176,8 +176,8 @@ class Map(object):
         opponent_land_count = np.sum(enemy)
         opponent_army_count = np.sum(self.armies * enemy)
 
-        new_state = {'mountains': visible_mountains, 'generals': visible_generals, 'hidden_terrain': hidden_terrain, 'fog': fog, \
-                     'friendly': visible_friendly, 'enemy': visible_enemy, 'cities': visible_cities, \
+        new_state = {'mountains': visible_mountains, 'generals': visible_generals, 'hidden_terrain': hidden_terrain, 'fog': fog,
+                     'friendly': visible_friendly, 'enemy': visible_enemy, 'cities': visible_cities,
                      'opp_land': opponent_land_count, 'opp_army': opponent_army_count, 'last_location': player.last_location}
         reward = player.reward_fn(player, player.last_state, new_state, opponent_land_count) + player.invalid_penalty
         done = self.owner[player.general_loc] != player.id_no or self.num_players == 1 or self.turn_count >= _TURN_LIMIT

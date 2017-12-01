@@ -220,7 +220,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     done_mask_ph = tf.placeholder(tf.float32, [None])  # end of episode mask (1 if next state = end of an episode)
 
     # Create networks (for current/next Q-values)
-    q_func = Model(arch, inputs=obs_t_ph_float, scope='q_func', reuse=False)  # model to use for computing the q-function
+    q_func = Model(arch, inputs=obs_t_ph_float, scope='q_func', reuse=False)
     target_q_func = Model(arch, inputs=obs_tp1_ph_float, scope='target_q_func', reuse=False)
 
     # Compute the Bellman error
@@ -237,8 +237,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     for q_j, y_j in zip(all_q_j, all_y_j):
         # scalar valued tensor representing Bellman error (error based on current and next Q-values)
         total_error += tf.reduce_mean(tf.square(y_j - q_j))
-    q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')  # all vars in Q-function network
-    target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')  # all vars in target network
+    q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')
+    target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
 
     # Construct optimization op (with gradient clipping)
     learning_rate = tf.placeholder(tf.float32, (), name='learning_rate')
@@ -267,6 +267,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     reset_kwargs = config.get('reset_kwargs', {})
     step_kwargs = config.get('step_kwargs', {})
     get_action_kwargs = config.get('get_action_kwargs', {})
+    get_random_kwargs = config.get('get_random_kwargs', {})
     last_obs, reward, done = env.reset(**reset_kwargs)
     last_obs_np = _obs_to_np(last_obs)
     normalize_inputs = train_params.get('normalize_inputs', True)
@@ -299,7 +300,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             eps = exploration.value(t)
             if not model_initialized or random.random() < eps:
                 # If first step, choose a random action
-                action = env.get_random_action(semi_valid=True, player_id=1)
+                action = env.get_random_action(**get_random_kwargs)
             else:
                 obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
                 feed_dict = {}
@@ -321,7 +322,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     run_dir = os.path.join('img', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
                     if not os.path.exists(run_dir):
                         os.makedirs(run_dir)
-                        print('Created directory at %s.\n' % run_dir)
+                        print('Saving images to %s.\n' % run_dir)
                     image.save("{}/Game_{}_Step_{}.png".format(run_dir, play_count, game_steps))
 
             if done:
@@ -408,7 +409,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 if train_params.get('save_model', True):
                     # Save network parameters and images from next episode
                     q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
-                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))  # don't need both?
+                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))  # both required?
                 save_images = train_params.get('save_images', True)
 
                 print_and_log('')  # newline
