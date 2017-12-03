@@ -93,6 +93,31 @@ class GeneralsEnv(Environment):
             raise NotImplementedError('action space not supported')
         return target_x, target_y, direction
 
+    def _get_movement_for_action(self, initial, direction):
+        """Maps (0, 1, 2, 3, 4) to (up, down, left, right, stay)."""
+        dirs = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0), 4: (0, 0)}
+        return initial[0] + dirs[direction][0], initial[1] + dirs[direction][1]
+
+    def _flat_to_2d(self, index):
+        return index // MAP_SIZE, index % MAP_SIZE
+
+    def _get_random_map(self, include_mountains=True, include_cities=True):
+        while True:
+            index = randint(0, len(self.replays) - 1)
+            replay = json.load(open(self.replays[index]))
+            if len(replay['usernames']) == 2 and replay['mapWidth'] == 18 and replay['mapHeight'] == 18:
+                break
+        m = Map(self.reward_fn_name)
+        if include_mountains:
+            for mountain in replay['mountains']:
+                m.add_mountain(self._flat_to_2d(mountain))
+        if include_cities:
+            for i in range(len(replay['cities'])):
+                m.add_city(self._flat_to_2d(replay['cities'][i]), replay['cityArmies'][i])
+        for general in replay['generals']:
+            m.add_general(self._flat_to_2d(general))
+        return m
+
     def step(self, action1, action2=None, player_id=1, preprocessors=()):
         """Takes two tuples of (x, y, dir).
         Action 1 is for player 1, 2 is for player 2
@@ -117,28 +142,6 @@ class GeneralsEnv(Environment):
                 out2 = (_prep(out2[0]),) + out2[1:]
         return out1 if player_id == 1 else out2
 
-    def _get_movement_for_action(self, initial, direction):
-        """Maps 0, 1, 2, 3, 4 to up, down, left, right, stay"""
-        dirs = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0), 4: (0, 0)}
-        return initial[0] + dirs[direction][0], initial[1] + dirs[direction][1]
-
-    def _get_random_map(self, include_mountains=True, include_cities=True):
-        while True:
-            index = randint(0, len(self.replays) - 1)
-            replay = json.load(open(self.replays[index]))
-            if len(replay['usernames']) == 2 and replay['mapWidth'] == 18 and replay['mapHeight'] == 18:
-                break
-        m = Map(self.reward_fn_name)
-        if include_mountains:
-            for mountain in replay['mountains']:
-                m.add_mountain(self._flat_to_2d(mountain))
-        if include_cities:
-            for i in range(len(replay['cities'])):
-                m.add_city(self._flat_to_2d(replay['cities'][i]), replay['cityArmies'][i])
-        for general in replay['generals']:
-            m.add_general(self._flat_to_2d(general))
-        return m
-
     def get_random_action(self, **kwargs):
         """Get a random move.
         If a "semi valid" move is desired, call `get_random_action` as
@@ -160,22 +163,6 @@ class GeneralsEnv(Environment):
         start_location = (target_x, target_y)
         end_location = self._get_movement_for_action(start_location, direction)
         return self.map.is_valid_action(self.map.players[1], start_location, end_location)
-
-    def get_nearest_valid_action(self, action, player_id=1):
-        """Returns the action closest to ACTION that is actually valid.
-        Only the square will ever be changed: it will become the nearest square that is owned by player PLAYER_ID
-        and has > 1 army unit on it. If player PLAYER_ID has no valid moves, the input action will be returned.
-        """
-        if self.is_valid_action(action):
-            return action
-        valid_start = np.logical_and(self.map.owner == player_id, self.map.armies > 1)
-        valid_start = np.transpose(valid_start.nonzero())
-        if len(valid_start) == 0:
-            return action
-        target_x, target_y, direction = self._decode_action(action)
-        dist = (valid_start[:, 0] - target_x) ** 2 + (valid_start[:, 1] - target_y) ** 2
-        start_location = valid_start[dist.argmin()]
-        return start_location[0], start_location[1], direction
 
     def get_action_from_q_values(self, q_values, ensure_valid=False):
         if ensure_valid:
@@ -203,9 +190,6 @@ class GeneralsEnv(Environment):
             return np.array([target_x, target_y, np.argmax(q_dir)])
         else:
             raise NotImplementedError('action space not supported')
-
-    def _flat_to_2d(self, index):
-        return index // MAP_SIZE, index % MAP_SIZE
 
     def get_image_of_state(self, state):
         mountains = state['mountains']
