@@ -33,8 +33,7 @@ def add_dimension(obs):
 
 class GeneralsEnv(Environment):
     def __init__(self, root_dir, reward_fn_name=None, action_space=None):
-        listdir = os.listdir(root_dir)
-        self.replays = [root_dir + file for file in listdir if file.endswith('.gioreplay')]
+        self.replays = [root_dir + filename for filename in os.listdir(root_dir) if filename.endswith('.gioreplay')]
         self.map = None
         self.reward_fn_name = reward_fn_name
         if type(action_space) == dict:
@@ -46,7 +45,7 @@ class GeneralsEnv(Environment):
         print('Loaded action space as %r.' % self.action_space)
 
     def reset(self, map_init='random', player_id=1, preprocessors=()):
-        """Sets the map using a random replay"""
+        """Sets the map using a random replay."""
         if map_init.lower() == 'empty':
             self.map = self._get_random_map(include_mountains=False, include_cities=False)
         elif map_init.lower() == 'random':

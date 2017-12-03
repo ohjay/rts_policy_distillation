@@ -18,6 +18,11 @@ def land_dt(player, state, next_state, opponent_land_count):
         return np.count_nonzero(next_state['friendly'])
     return np.count_nonzero(next_state['friendly']) - np.count_nonzero(state['friendly'])
 
+def fifty_squares_acquired(player, state, next_state, opponent_land_count):
+    if state is None:
+        return 1 if np.count_nonzero(next_state['friendly']) >= 50 else 0
+    return 1 if np.count_nonzero(next_state['friendly']) >= 50 else 0
+
 def move_made(player, state, next_state, opponent_land_count):
     """Assumes that the opponent is NOT making moves."""
     if state is None:

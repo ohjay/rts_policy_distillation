@@ -9,12 +9,12 @@ env: generals_sim
 operation: train  # choices: (train,)
 
 train_params:
-  random_seed: 0
+  random_seed: 1
   num_timesteps: 40000000
   lr_multiplier: 1.0
   replay_buffer_size: 1000000
-  batch_size: 32
-  gamma: 0.99
+  batch_size: 64
+  gamma: 0.0
   learning_starts: 50000
   learning_freq: 1
   frame_history_len: 1
@@ -57,7 +57,7 @@ step_kwargs:
     - add_dimension
 
 get_action_kwargs:
-  ensure_valid: False  # ensure that Q values produce a VALID action?
+  ensure_valid: True  # ensure that Q values produce a VALID action?
 
 get_random_kwargs:
   semi_valid: True  # choose a random action that is guaranteed to "probably" be valid?
@@ -68,27 +68,9 @@ get_random_kwargs:
 
 dqn_arch:
   inputs:
-#    mountains:
-#      dtype: uint8
-#      shape: [18, 18]
-#    generals:
-#      dtype: uint8
-#      shape: [18, 18]
-#    hidden_terrain:
-#      dtype: uint8
-#      shape: [18, 18]
-#    fog:
-#      dtype: uint8
-#      shape: [18, 18]
     friendly:
       dtype: uint8
       shape: [18, 18, 1]
-#    enemy:
-#      dtype: uint8
-#      shape: [18, 18]
-#    cities:
-#      dtype: uint8
-#      shape: [18, 18]
 
   layers:
     - inputs: [friendly]
@@ -108,7 +90,7 @@ dqn_arch:
       stride: 1
       activation: relu
     - type: fc
-      num_outputs: 512
+      num_outputs: 128
       activation: relu
 
   outputs:
