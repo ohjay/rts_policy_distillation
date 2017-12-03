@@ -24,15 +24,7 @@ def rm_rf(dir, confirmation_prompt=None):
         confirmation = True
     if (isinstance(confirmation, bool) and confirmation) \
             or (isinstance(confirmation, str) and confirmation.lower() == 'true'):
-        for filename in os.listdir(dir):
-            filepath = os.path.join(dir, filename)
-            try:
-                if os.path.isfile(filepath):
-                    os.unlink(filepath)
-                elif os.path.isdir(filepath):
-                    shutil.rmtree(filepath)
-            except Exception as e:
-                print(e)
+        shutil.rmtree(dir)
         print('Successfully removed everything inside of `%s`.' % dir)
     else:
         print('Operation `rm -rf %s` aborted.' % dir)

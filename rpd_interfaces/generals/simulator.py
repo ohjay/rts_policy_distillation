@@ -126,10 +126,10 @@ class Map(object):
         if start_location == end_location:
             return
         s_x, s_y = start_location
-        e_x, e_y = end_location # and self.terrain[e_x, e_y] != _MOUNTAIN
+        e_x, e_y = end_location  # and self.terrain[e_x, e_y] != _MOUNTAIN
         if self.owner[s_x, s_y] == player.id_no \
-            and self.armies[s_x, s_y] > 1 \
-            and np.abs(s_x - e_x) + np.abs(s_y - e_y) == 1: 
+                and self.armies[s_x, s_y] > 1 \
+                and np.abs(s_x - e_x) + np.abs(s_y - e_y) == 1:
 
             moving = self.armies[s_x, s_y] - 1
             self.armies[s_x, s_y] = 1
@@ -176,25 +176,34 @@ class Map(object):
         opponent_land_count = np.sum(enemy)
         opponent_army_count = np.sum(self.armies * enemy)
 
-        new_state = {'mountains': visible_mountains, 'generals': visible_generals, 'hidden_terrain': hidden_terrain, 'fog': fog,
-                     'friendly': visible_friendly, 'enemy': visible_enemy, 'cities': visible_cities,
-                     'opp_land': opponent_land_count, 'opp_army': opponent_army_count, 'last_location': player.last_location}
+        new_state = {
+            'mountains':      visible_mountains,
+            'generals':       visible_generals,
+            'hidden_terrain': hidden_terrain,
+            'fog':            fog,
+            'friendly':       visible_friendly,
+            'enemy':          visible_enemy,
+            'cities':         visible_cities,
+            'opp_land':       opponent_land_count,
+            'opp_army':       opponent_army_count,
+            'last_location':  player.last_location
+        }
         reward = player.reward_fn(player, player.last_state, new_state, opponent_land_count) + player.invalid_penalty
         done = self.owner[player.general_loc] != player.id_no or self.num_players == 1 or self.turn_count >= _TURN_LIMIT
         player.set_output((new_state, reward, done))
 
     def _spawn(self):
-        for x,y in self.cities_list:
-            if self.owner[x,y] != _NEUTRAL or self.armies[x,y] < _CITY_MAX_ARMY:
-                self.armies[x,y] += 1
-        for x,y in self.generals_list:
-            self.armies[x,y] += 1
+        for x, y in self.cities_list:
+            if self.owner[x, y] != _NEUTRAL or self.armies[x, y] < _CITY_MAX_ARMY:
+                self.armies[x, y] += 1
+        for x, y in self.generals_list:
+            self.armies[x, y] += 1
 
         if self.turn_count % 25 == 0:
-            player_owned = (self.owner > 0)
+            player_owned = self.owner > 0
             self.armies += player_owned
 
-    def action(self, player_id, start_location, end_location): # is_half, player_id
+    def action(self, player_id, start_location, end_location):  # is_half, player_id
         if player_id in self.players:
             if 0 <= end_location[0] < MAP_SIZE and 0 <= end_location[1] < MAP_SIZE:
                 self.players[player_id].set_action((start_location, end_location))

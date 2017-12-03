@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os
+import copy
 import yaml
 import argparse
 import random
@@ -109,7 +110,8 @@ def run(config):
     elif config['env'] == 'generals_sim':
         from rpd_interfaces.generals import generals_sim
         reward_fn_name = env_info.get('reward_fn_name', None)
-        env = generals_sim.GeneralsEnv('replays_prod/', reward_fn_name=reward_fn_name)
+        action_space = copy.deepcopy(config['dqn_arch']['outputs'])
+        env = generals_sim.GeneralsEnv('replays_prod/', reward_fn_name=reward_fn_name, action_space=action_space)
     elif config['env'].startswith('atari_pong'):
         from rpd_interfaces.atari import atari
         env = atari.AtariEnv(config['env'])

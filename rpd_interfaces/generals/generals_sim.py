@@ -10,10 +10,15 @@ This version is local and doesn't require any networking.
 from random import randint
 import json
 import os
+import collections
 from PIL import Image, ImageDraw, ImageFont
 
 from rpd_interfaces.generals.simulator import *
 from rpd_interfaces.interfaces import Environment
+
+DEFAULT_ACTION_SPACE = [('target_x', [18]), ('target_y', [18]), ('direction', [4])]
+DEFAULT_ACTION_SPACE = collections.OrderedDict(DEFAULT_ACTION_SPACE)  # {output_name: shape}
+NUM_DIRECTIONS = 4
 
 
 # Preprocessors
@@ -27,11 +32,18 @@ def add_dimension(obs):
 
 
 class GeneralsEnv(Environment):
-    def __init__(self, root_dir, reward_fn_name=None):
+    def __init__(self, root_dir, reward_fn_name=None, action_space=None):
         listdir = os.listdir(root_dir)
         self.replays = [root_dir + file for file in listdir if file.endswith('.gioreplay')]
         self.map = None
         self.reward_fn_name = reward_fn_name
+        if type(action_space) == dict:
+            self.action_space = collections.OrderedDict()
+            for output_name in sorted(action_space.keys(), key=lambda x: action_space[x].get('order', float('inf'))):
+                self.action_space[output_name] = action_space[output_name]['shape']
+        else:
+            self.action_space = DEFAULT_ACTION_SPACE
+        print('Loaded action space as %r.' % self.action_space)
 
     def reset(self, map_init='random', player_id=1, preprocessors=()):
         """Sets the map using a random replay"""
@@ -47,33 +59,52 @@ class GeneralsEnv(Environment):
             out = (eval(prep)(out[0]),) + out[1:]
         return out
 
+    def _encode_action(self, target_x, target_y, direction):
+        """Converts (target_x, target_y, direction) into a single action value."""
+        if len(self.action_space) == 1:
+            # Assume (x, y, dir) all wrapped up in one value
+            action = np.array([NUM_DIRECTIONS * (MAP_SIZE * target_x + target_y) + direction])
+        elif len(self.action_space) == 2:
+            # Assume the two outputs are an xy-point and a direction
+            action = np.array([MAP_SIZE * target_x + target_y, direction])
+        elif len(self.action_space) == 3:
+            # Assume the outputs are all separate
+            action = np.array([target_x, target_y, direction])
+        else:
+            raise NotImplementedError('action space not supported')
+        return action
+
+    def _decode_action(self, action):
+        """Breaks an action into its (target_x, target_y, direction) components."""
+        if len(self.action_space) == 1:
+            # Assume (x, y, dir) all wrapped up in one value
+            xy_direction = action[0]
+            direction = xy_direction % NUM_DIRECTIONS
+            xy = xy_direction // 4
+            target_x, target_y = xy // MAP_SIZE, xy % MAP_SIZE
+        elif len(self.action_space) == 2:
+            # Assume the two outputs are an xy-point and a direction
+            xy, direction = action[0], action[1]
+            target_x, target_y = xy // MAP_SIZE, xy % MAP_SIZE
+        elif len(self.action_space) == 3:
+            # Assume the outputs are all separate
+            target_x, target_y, direction = action[0], action[1], action[2]
+        else:
+            raise NotImplementedError('action space not supported')
+        return target_x, target_y, direction
+
     def step(self, action1, action2=None, player_id=1, preprocessors=()):
         """Takes two tuples of (x, y, dir).
         Action 1 is for player 1, 2 is for player 2
         Returns: (state1, reward1, dead1), (state2, reward2, dead2)
         """
-        start_loc1 = (action1[0], action1[1])
-        self.map.action(1, start_loc1, self._get_movement_for_action(start_loc1, action1[2]))
+        target_x1, target_y1, direction1 = self._decode_action(action1)
+        start_loc1 = (target_x1, target_y1)
+        self.map.action(1, start_loc1, self._get_movement_for_action(start_loc1, direction1))
         if action2:
-            start_loc2 = (action2[0], action2[1])
-            self.map.action(2, start_loc2, self._get_movement_for_action(start_loc2, action2[2]))
-        self.map.update()
-        out1 = self.map.players[1].get_output()
-        out2 = None
-        if action2:
-            out2 = self.map.players[2].get_output()
-        for prep in preprocessors:
-            _prep = eval(prep)
-            out1 = (_prep(out1[0]),) + out1[1:]
-            if out2 is not None:
-                out2 = (_prep(out2[0]),) + out2[1:]
-        return out1 if player_id == 1 else out2
-
-    def step_simple(self, action1, action2=None, player_id=1, preprocessors=()):
-        """Takes two directions, and moves each agent in the corresponding direction."""
-        self.map.action_simple(1, self._get_movement_for_action((0, 0), action1))
-        if action2:
-            self.map.action_simple(2, self._get_movement_for_action((0, 0), action2))
+            target_x2, target_y2, direction2 = self._decode_action(action2)
+            start_loc2 = (target_x2, target_y2)
+            self.map.action(2, start_loc2, self._get_movement_for_action(start_loc2, direction2))
         self.map.update()
         out1 = self.map.players[1].get_output()
         out2 = None
@@ -115,20 +146,19 @@ class GeneralsEnv(Environment):
         """
         if kwargs.get('semi_valid', False) and 'player_id' in kwargs:
             return self.get_random_semi_valid_action(**{'player_id': kwargs['player_id']})
-        return np.array((randint(0, 17), randint(0, 17), randint(0, 3)))
+        return np.array([randint(0, shape[0] - 1) for shape in self.action_space.values()])
 
     def get_random_semi_valid_action(self, player_id):
         valid_start = np.logical_and(self.map.owner == player_id, self.map.armies > 1)
         valid_start = np.transpose(valid_start.nonzero())
         start = valid_start[randint(0, len(valid_start) - 1)]
-        return np.array((start[0], start[1], randint(0, 3)))
-
-    def is_friendly_square(self, x, y, player_id=1):
-        return self.map.owner[x, y] == player_id
+        random_dir = randint(0, 3)
+        return self._encode_action(start[0], start[1], random_dir)
 
     def is_valid_action(self, action):
-        start_location = (action[0], action[1])
-        end_location = self._get_movement_for_action(start_location, action[2])
+        target_x, target_y, direction = self._decode_action(action)
+        start_location = (target_x, target_y)
+        end_location = self._get_movement_for_action(start_location, direction)
         return self.map.is_valid_action(self.map.players[1], start_location, end_location)
 
     def get_nearest_valid_action(self, action, player_id=1):
@@ -142,48 +172,37 @@ class GeneralsEnv(Environment):
         valid_start = np.transpose(valid_start.nonzero())
         if len(valid_start) == 0:
             return action
-        dist = (valid_start[:, 0] - action[0]) ** 2 + (valid_start[:, 1] - action[1]) ** 2
+        target_x, target_y, direction = self._decode_action(action)
+        dist = (valid_start[:, 0] - target_x) ** 2 + (valid_start[:, 1] - target_y) ** 2
         start_location = valid_start[dist.argmin()]
-        return start_location[0], start_location[1], action[2]
+        return start_location[0], start_location[1], direction
 
     def get_action_from_q_values(self, q_values, ensure_valid=False):
         if ensure_valid:
             return self.get_valid_action_from_q_values(q_values)
-        if len(q_values) == 1:
-            q_values = np.reshape(q_values, (MAP_SIZE, MAP_SIZE, 4))
-            act_x, act_y, act_dir = np.unravel_index(np.argmax(q_values), q_values.shape)
-        elif len(q_values) == 3:
-            act_x, act_y = np.argmax(q_values[0]), np.argmax(q_values[1])
-            act_dir = np.argmax(q_values[2])
-        else:
-            raise NotImplementedError('action space not supported')
-        return np.array((act_x, act_y, act_dir))
+
+        # Q_VALUES is assumed to be a list containing the set of Q values for each output
+        return np.array([np.argmax(q_values[i].flatten()) for i in range(len(self.action_space))])
 
     def get_valid_action_from_q_values(self, q_values, player_id=1):
-        """
-        If there is one Q-value - (x, y, dir):
-        - Select the VALID (x, y, dir) with the highest Q value.
-
-        If there are three Q values - x, y, and dir:
-        - Select the VALID (x, y) with the highest q_x[x] + q_y[y].
-        - Select the dir with the highest q_dir[dir].
-        * assumes x is vertical (first index into NumPy arrays), and y is horizontal
-        * assumes Q_X and Q_Y are both (1, 18) arrays
-        """
-        if len(q_values) == 1:
-            q_values = np.reshape(q_values, (MAP_SIZE, MAP_SIZE, 4))
-            valid_start = np.logical_and(self.map.owner == player_id, self.map.armies > 1)
-            q_values_valid = q_values * np.repeat(valid_start[:, :, None], 4, axis=2)
-            act_x, act_y, act_dir = np.unravel_index(np.argmax(q_values_valid), q_values_valid.shape)
-        elif len(q_values) == 3:
+        valid_start = np.logical_and(self.map.owner == player_id, self.map.armies > 1)
+        valid_start_1d = valid_start.flatten('F')  # column-major because we assume that x is horizontal
+        if len(self.action_space) == 1:
+            q_values_valid = [q_values[0].flatten() * np.repeat(valid_start_1d, NUM_DIRECTIONS)]
+            return np.array([np.argmax(q_values_valid[0].flatten())])
+        elif len(self.action_space) == 2:
+            q_xy_valid = q_values[0].flatten() * valid_start_1d
+            return np.array([np.argmax(q_xy_valid), np.argmax(q_values[1].flatten())])
+        elif len(self.action_space) == 3:
             q_x, q_y, q_dir = q_values
-            q_xy = np.repeat(q_x.T, MAP_SIZE, axis=1) + np.repeat(q_y, MAP_SIZE, axis=0)
-            q_xy_valid = q_xy * np.logical_and(self.map.owner == player_id, self.map.armies > 1)
-            act_x, act_y = np.unravel_index(np.argmax(q_xy_valid), q_xy_valid.shape)
-            act_dir = np.argmax(q_dir)
+            q_x, q_y = q_x.flatten(), q_y.flatten()
+            q_xy = np.repeat(q_x[None, :], MAP_SIZE, axis=0) + np.repeat(q_y[:, None], MAP_SIZE, axis=1)
+            q_xy_valid = (q_xy * valid_start).flatten('F')
+            target_xy = np.argmax(q_xy_valid)
+            target_x, target_y = target_xy // MAP_SIZE, target_xy % MAP_SIZE
+            return np.array([target_x, target_y, np.argmax(q_dir)])
         else:
             raise NotImplementedError('action space not supported')
-        return np.array((act_x, act_y, act_dir))
 
     def _flat_to_2d(self, index):
         return index // MAP_SIZE, index % MAP_SIZE
@@ -198,9 +217,9 @@ class GeneralsEnv(Environment):
         cities = state['cities']
         last_location = state['last_location']
 
-        size = 400
-        step = size / MAP_SIZE
-        image = Image.new('RGBA', (size, size), (255, 255, 255, 255))
+        px_size = 400
+        step = px_size / MAP_SIZE
+        image = Image.new('RGBA', (px_size, px_size), (255, 255, 255, 255))
         d = ImageDraw.Draw(image)
         colors = [
             (255, 255, 255, 255),   # 0 - Empty - white
@@ -213,43 +232,43 @@ class GeneralsEnv(Environment):
             (255, 0, 0, 255),       # 7 - Red player
             (0, 0, 100, 255)        # 8 - Blue player last location - Dark Blue
         ]
-        dir = os.path.dirname(__file__)
+        font_dir = os.path.dirname(__file__)
         try:
-            font = ImageFont.truetype(os.path.join(dir, 'FreeMono.ttf'), 40)
+            font = ImageFont.truetype(os.path.join(font_dir, 'FreeMono.ttf'), 40)
         except IOError as e:
-            print('IOError: failed to open font file at %s.' % os.path.join(dir, 'FreeMono.ttf'))
+            print('IOError: failed to open font file at %s.' % os.path.join(font_dir, 'FreeMono.ttf'))
         for i in range(MAP_SIZE):
             for j in range(MAP_SIZE):
                 d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[0])
-                if mountains[i,j]: # Hack
+                if mountains[i, j]:
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[3])
                 if friendly[i, j]:
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[6])
                     general = ''
                     if generals[i, j]:
                         general = '*'
-                    d.text((i * step + step//4, j * step + step//4), str(int(friendly[i, j])) + general, fill=colors[0])
-                if enemy[i,j]:
+                    d.text((i * step + step // 4, j * step + step // 4), str(int(friendly[i, j])) + general, fill=colors[0])
+                if enemy[i, j]:
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[7])
                     general = ''
                     if generals[i, j]:
                         general = '*'
-                    d.text((i * step + step//4, j * step + step//4), str(int(enemy[i, j])) + general, fill=colors[0])
-                if cities[i,j]:
+                    d.text((i * step + step // 4, j * step + step // 4), str(int(enemy[i, j])) + general, fill=colors[0])
+                if cities[i, j]:
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[2])
-                    d.text((i * step + step//4, j * step + step//4), str(int(cities[i, j])), fill=colors[0])
-                if mountains[i,j]:
-                    d.text((i * step + step//4, j * step + step//4), '^^', fill=colors[0])
-                if fog[i,j]:
+                    d.text((i * step + step // 4, j * step + step // 4), str(int(cities[i, j])), fill=colors[0])
+                if mountains[i, j]:
+                    d.text((i * step + step // 4, j * step + step // 4), '^^', fill=colors[0])
+                if fog[i, j]:
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[4])
-                if hidden_terrain[i,j]:
+                if hidden_terrain[i, j]:
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[5])
-                    d.text((i * step + step//4, j * step + step//4), '??', fill=colors[0])
-                if (i,j) == last_location:
+                    d.text((i * step + step // 4, j * step + step // 4), '??', fill=colors[0])
+                if (i, j) == last_location:
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[8])
                     general = ''
                     if generals[i, j]:
                         general = '*'
-                    d.text((i * step + step//4, j * step + step//4), str(int(friendly[i, j])) + general, fill=colors[0])
+                    d.text((i * step + step // 4, j * step + step // 4), str(int(friendly[i, j])) + general, fill=colors[0])
         del d
         return image
