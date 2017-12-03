@@ -14,7 +14,7 @@ train_params:
   lr_multiplier: 1.0
   replay_buffer_size: 1000000
   batch_size: 64
-  gamma: 0.0
+  gamma: 0.99
   learning_starts: 50000
   learning_freq: 1
   frame_history_len: 1
@@ -32,7 +32,7 @@ train_params:
   log_freq: 50  # log every X episodes
   log_recent_rewards: True
   save_model: False
-  save_images: True
+  save_images: False
   restore_from:  # TODO (currently not used)
     run_dir: run_11-30__20_35
     checkpoint: 50000
@@ -43,7 +43,7 @@ generals_sim:
   map_height: 18
   map_width: 18
   map_player_count: 2
-  reward_fn_name: land_dt  # choice of reward function in `simulator.py`
+  reward_fn_name: x_squares_acquired  # choice of reward function in `simulator.py`
 
 reset_kwargs:
   map_init: empty  # choices: (empty, random)
