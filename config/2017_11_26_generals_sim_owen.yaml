@@ -11,7 +11,7 @@ operation: train  # choices: (train,)
 train_params:
   random_seed: 1
   num_timesteps: 40000000
-  lr_multiplier: 1.0
+  lr_multiplier: 0.1
   replay_buffer_size: 1000000
   batch_size: 64
   gamma: 0.99
@@ -57,7 +57,7 @@ step_kwargs:
     - add_dimension
 
 get_action_kwargs:
-  ensure_valid: True  # ensure that Q values produce a VALID action?
+  ensure_valid: False  # ensure that Q values produce a VALID action?
 
 get_random_kwargs:
   semi_valid: True  # choose a random action that is guaranteed to "probably" be valid?
@@ -94,10 +94,10 @@ dqn_arch:
       activation: relu
 
   outputs:
-#    action:
-#      dtype: int32
-#      shape: [1296]  # 18 * 18 * 4
-#      activation: X
+    action:
+      dtype: int32
+      shape: [1296]  # 18 * 18 * 4
+      activation: X
 
 #    target_x:
 #      dtype: int32
@@ -115,13 +115,13 @@ dqn_arch:
 #      activation: X
 #      order: 2
 
-    target_xy:
-      dtype: int32
-      shape: [324]
-      activation: X
-      order: 0
-    direction:
-      dtype: int32
-      shape: [4]  # five actions centered around active square
-      activation: X
-      order: 1
+#    target_xy:
+#      dtype: int32
+#      shape: [324]
+#      activation: X
+#      order: 0
+#    direction:
+#      dtype: int32
+#      shape: [4]  # five actions centered around active square
+#      activation: X
+#      order: 1

@@ -36,7 +36,7 @@ class GeneralsEnv(Environment):
         self.replays = [root_dir + filename for filename in os.listdir(root_dir) if filename.endswith('.gioreplay')]
         self.map = None
         self.reward_fn_name = reward_fn_name
-        print('Loaded reward function name as %s.' % self.reward_fn_name)
+        print('Loaded reward function as `%s.`' % self.reward_fn_name)
         if type(action_space) == dict:
             self.action_space = collections.OrderedDict()
             for output_name in sorted(action_space.keys(), key=lambda x: action_space[x].get('order', float('inf'))):
