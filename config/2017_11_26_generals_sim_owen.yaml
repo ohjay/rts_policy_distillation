@@ -14,8 +14,8 @@ train_params:
   num_timesteps: 40000000
   lr_multiplier: 0.1
   replay_buffer_size: 1000000
-  batch_size: 64
-  gamma: 0.99
+  batch_size: 128
+  gamma: 0.00
   learning_starts: 50000
   learning_freq: 1
   frame_history_len: 1
@@ -29,7 +29,7 @@ train_params:
     - 0: 0.80
     - 1e6: 0.10
     - num_iterations / 2: 0.01
-  normalize_inputs: False
+  normalize_inputs: True
   log_freq: 50  # log every X episodes
   log_recent_rewards: True
   save_model: False
@@ -44,7 +44,7 @@ generals_sim:
   map_height: 18
   map_width: 18
   map_player_count: 2
-  reward_fn_name: x_squares_acquired  # choice of reward function in `simulator.py`
+  reward_fn_name: move_made  # choice of reward function in `simulator.py`
 
 reset_kwargs:
   map_init: empty  # choices: (empty, random)
@@ -80,25 +80,15 @@ dqn_arch:
       kernel_size: 8
       stride: 4
       activation: relu
-    - type: conv2d
-      num_outputs: 64
-      kernel_size: 4
-      stride: 2
-      activation: relu
-    - type: conv2d
-      num_outputs: 64
-      kernel_size: 3
-      stride: 1
-      activation: relu
     - type: fc
-      num_outputs: 128
+      num_outputs: 8
       activation: relu
 
   outputs:
-    action:
-      dtype: int32
-      shape: [1296]  # 18 * 18 * 4
-      activation: X
+#    action:
+#      dtype: int32
+#      shape: [1296]  # 18 * 18 * 4
+#      activation: X
 
 #    target_x:
 #      dtype: int32
@@ -116,13 +106,13 @@ dqn_arch:
 #      activation: X
 #      order: 2
 
-#    target_xy:
-#      dtype: int32
-#      shape: [324]
-#      activation: X
-#      order: 0
-#    direction:
-#      dtype: int32
-#      shape: [4]  # five actions centered around active square
-#      activation: X
-#      order: 1
+    target_xy:
+      dtype: int32
+      shape: [324]
+      activation: X
+      order: 0
+    direction:
+      dtype: int32
+      shape: [4]  # five actions centered around active square
+      activation: X
+      order: 1

@@ -120,7 +120,7 @@ def run(config):
         env = generals_sim.GeneralsEnv('replays_prod/', reward_fn_name=reward_fn_name, action_space=action_space)
     elif config['env'].startswith('atari_pong'):
         from rpd_interfaces.atari import atari
-        env = atari.AtariEnv(config['env'])
+        env = atari.AtariEnv(config['env'], monitor=env_info.get('monitor', True))
 
     algorithm = config.get('algorithm', 'DQN')
     assert algorithm in SUPPORTED_ALGS, 'not a supported algorithm'

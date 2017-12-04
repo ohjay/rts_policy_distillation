@@ -18,7 +18,7 @@ import pickle
 import random
 import numpy as np
 import scipy.signal
-from collections import namedtuple
+from collections import namedtuple, deque
 
 from rpd_learning.obs_codecs import StandardCodec
 from rpd_learning.models import A3CPolicy
@@ -59,9 +59,9 @@ def learn(num_workers, max_batches, env, config, batch_size=32):
 
     ray.init()
     policy = A3CPolicy(arch)
-    remote_env = ray.put(env)
+    # remote_env = ray.put(env)
     remote_config = ray.put(config)
-    workers = [Runner.remote(remote_env, remote_config) for _ in range(num_workers)]
+    workers = [Runner.remote(remote_config) for _ in range(num_workers)]
     parameters = policy.get_weights()
     remote_params = ray.put(parameters)
     ray.get([worker.set_weights.remote(remote_params) for worker in workers])
@@ -98,8 +98,10 @@ class Runner(object):
         sampler: Component for interacting with environment and generating
             rollouts.
     """
-    def __init__(self, env, config):
-        self.env = env
+    def __init__(self, config):
+        from rpd_interfaces.atari import atari
+        self.env = atari.AtariEnv(config['env'], monitor=config.get(config['env'], {}).get('monitor', True))
+        # self.env = env
         self.config = config
         self.policy = A3CPolicy(self.config['dqn_arch'])
 
@@ -121,34 +123,43 @@ class Runner(object):
         self.episode_returns = []
 
     # TODO: make this asynchronous
-    def get_data(self, max_timesteps=100, eps=0.1):
+    def get_data(self, max_timesteps=1000, eps=0.1):
         """Grab a rollout that is at most MAX_TIMESTEPS timesteps long."""
         rollout = {'state': [], 'action': [], 'reward': [], 'value': [], 'is_terminal': False, 'last_r': 0}
         episode_return = 0
 
         last_obs, reward, done = self.env.reset(**self.reset_kwargs)
         last_obs = last_obs.values()[0]  # TODO hacky
+        last_obs_prev4 = deque(maxlen=4)
+        last_obs_prev4.append(last_obs)
         for t in range(max_timesteps):
             # Choose an action
-            if random.random() < eps:
+            if random.random() < eps or len(last_obs_prev4) < 4:
                 action = self.env.get_random_action(**self.get_random_kwargs)[0]  # random action
-                pi_info = {'value': self.policy.value(last_obs)}
+                # pi_info = {'value': self.policy.value(last_obs)}
+                if len(last_obs_prev4) == 4:
+                    pi_info = {'value': self.policy.value(np.concatenate(last_obs_prev4, axis=2))}
             else:
-                action, pi_info = self.policy.compute_action(last_obs)
+                # action, pi_info = self.policy.compute_action(last_obs)
+                action, pi_info = self.policy.compute_action(np.concatenate(last_obs_prev4, axis=2))
             obs, reward, done = self.env.step(np.array([action]), **self.step_kwargs)  # TODO hacky action processing
             obs = obs.values()[0]  # TODO hacky
-            rollout['state'].append(last_obs)
-            rollout['action'].append(action)
-            rollout['reward'].append(reward)
-            rollout['value'].append(pi_info['value'])
+
+            if len(last_obs_prev4) == 4:
+                rollout['state'].append(np.concatenate(last_obs_prev4, axis=2))
+                rollout['action'].append(action)
+                rollout['reward'].append(reward)
+                rollout['value'].append(pi_info['value'])
             episode_return += reward
             if done:
                 rollout['is_terminal'] = True
                 break
             last_obs = obs
+            last_obs_prev4.append(last_obs)
 
-        if not rollout['is_terminal']:
-            rollout['last_r'] = self.policy.value(last_obs)
+        if not rollout['is_terminal'] and len(last_obs_prev4) == 4:
+            # rollout['last_r'] = self.policy.value(last_obs)
+            rollout['last_r'] = self.policy.value(np.concatenate(last_obs_prev4, axis=2))
 
         self.episode_returns.append(episode_return)
         if len(self.episode_returns) > 0:
@@ -167,7 +178,9 @@ class Runner(object):
         }
 
     def compute_gradient(self):
-        rollout = self.get_data()
+        rollout = {'state': []}
+        while len(rollout['state']) == 0:
+            rollout = self.get_data()
         batch = process_rollout(rollout, gamma=0.99, lambda_=1.0)
         gradient, info = self.policy.compute_gradients(batch)
         return gradient, info

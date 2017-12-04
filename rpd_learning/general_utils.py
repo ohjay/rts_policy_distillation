@@ -24,7 +24,7 @@ def rm_rf(dir, confirmation_prompt=None):
     if (isinstance(confirmation, bool) and confirmation) \
             or (isinstance(confirmation, str) and confirmation.lower() == 'true'):
         shutil.rmtree(dir)
-        print('Successfully removed everything inside of `%s`.' % dir)
+        print('Successfully removed `%s` and all of its contents.' % dir)
     else:
         print('Operation `rm -rf %s` aborted.' % dir)
 
