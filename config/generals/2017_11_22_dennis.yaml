@@ -21,57 +21,62 @@ generals_sim:
 
 dqn_arch:
   inputs:
-    mountains:
-      dtype: float32 # or uint8?
-      shape: [18, 18]
-    generals:
-      dtype: float32
-      shape: [18, 18]
-    hidden_terrain:
-      dtype: float32
-      shape: [18, 18]
-    fog:
-      dtype: float32
-      shape: [18, 18]
+    # mountains:
+    #   dtype: float32 # or uint8?
+    #   shape: [18, 18]
+    # generals:
+    #   dtype: float32
+    #   shape: [18, 18]
+    # hidden_terrain:
+    #   dtype: float32
+    #   shape: [18, 18]
+    # fog:
+    #   dtype: float32
+    #   shape: [18, 18]
     friendly:
       dtype: float32
       shape: [18, 18]
-    enemy:
-      dtype: float32
-      shape: [18, 18]
-    cities:
-      dtype: float32
-      shape: [18, 18]
+    # enemy:
+    #   dtype: float32
+    #   shape: [18, 18]
+    # cities:
+    #   dtype: float32
+    #   shape: [18, 18]
 
   layers:
-    - inputs: [mountains, generals, hidden_terrain, fog, friendly, enemy, cities]
+    # - inputs: [mountains, generals, hidden_terrain, fog, friendly, enemy, cities]
+    - inputs: [friendly]
       type: conv2d
       num_outputs: 32
-      kernel_size: 8
-      stride: 4
-      activation: relu
-    - type: conv2d
-      num_outputs: 64
-      kernel_size: 4
-      stride: 2
-      activation: relu
-    - type: conv2d
-      num_outputs: 64
       kernel_size: 3
       stride: 1
       activation: relu
+    # - type: conv2d
+    #  num_outputs: 64
+    #  kernel_size: 4
+    #  stride: 2
+    #  activation: relu
+    # - type: conv2d
+    #  num_outputs: 64
+    #  kernel_size: 3
+    #  stride: 1
+    #  activation: relu
     - type: fc
-      num_outputs: 512
+      num_outputs: 256
       activation: relu
 
   outputs:
-    target_x:
+    # target_x:
+    #   dtype: float32
+    #   shape: [18]
+    #   activation: X
+    # target_y:
+    #   dtype: float32
+    #   shape: [18]
+    #   activation: X
+    target:
       dtype: float32
-      shape: [18]
-      activation: X
-    target_y:
-      dtype: float32
-      shape: [18]
+      shape: [324]
       activation: X
     direction:
       dtype: float32

@@ -68,9 +68,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
     arch = config['dqn_arch']
     num_dir = arch['outputs']['direction']['shape'][0]
-    num_x = arch['outputs']['target_x']['shape'][0]
-    num_y = arch['outputs']['target_y']['shape'][0]
-
+    num_t = arch['outputs']['target']['shape'][0]
 
     def _obs_to_np(obs):
         """Reformats observation as a single NumPy array.
@@ -106,8 +104,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             obs_t_ph_float[input_name] = obs_t_ph[input_name]
         else:  # casting to float on GPU ensures lower data transfer times
             obs_t_ph_float[input_name] = tf.cast(obs_t_ph[input_name], tf.float32) / 255.0
-    act_t_x_ph = tf.placeholder(tf.int32, [None]) # current action
-    act_t_y_ph = tf.placeholder(tf.int32, [None])
+    act_t_t_ph = tf.placeholder(tf.int32, [None]) # current action
     act_t_dir_ph = tf.placeholder(tf.int32, [None])  
     rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
     obs_tp1_ph = {input_name: None for input_name in arch['inputs'].keys()}  # next observation (or state)
@@ -127,22 +124,17 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     target_q_func = Model(arch, inputs=obs_tp1_ph_float, scope='target_q_func', reuse=False)
     
     q_dir_out = q_func.outputs['direction']
-    q_x_out = q_func.outputs['target_x']
-    q_y_out = q_func.outputs['target_y']
+    q_t_out = q_func.outputs['target']
     target_dir_out = target_q_func.outputs['direction']
-    target_x_out = target_q_func.outputs['target_x']
-    target_y_out = target_q_func.outputs['target_y']
+    target_t_out = target_q_func.outputs['target']
 
     # Compute the Bellman error
-    q_x_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_x_ph, num_x), q_x_out), axis=1)
-    y_x_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_x_out), axis=1))
-    q_y_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_y_ph, num_y), q_y_out), axis=1)
-    y_y_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_y_out), axis=1))
+    q_t_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_t_ph, num_t), q_t_out), axis=1)
+    y_t_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_t_out), axis=1))
     q_dir_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_dir_ph, num_dir), q_dir_out), axis=1)
     y_dir_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_dir_out), axis=1))
 
-    total_error = tf.reduce_mean(tf.square(y_x_j - q_x_j)) + \
-                  tf.reduce_mean(tf.square(y_y_j - q_y_j)) + \
+    total_error = tf.reduce_mean(tf.square(y_t_j - q_t_j)) + \
                   tf.reduce_mean(tf.square(y_dir_j - q_dir_j)) # scalar valued tensor representing Bellman error (evaluate the current and next Q-values and construct corresponding error)
     q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')  # all vars in Q-function network
     target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')  # all vars in target network
@@ -178,8 +170,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     game_steps = 0
 
     episode_rewards = []
-    move_valid = []
     net_or_rand = []
+    recent_moves = []
+    avg_rewards = []
 
     save_images = False
 
@@ -193,7 +186,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         eps = exploration.value(t)
         if not model_initialized or random() < eps:
             # If first step, choose a random action
+            # action = env.get_random_action()
             action = env.get_random_semi_valid_action(1)
+            store_action = np.array((action[0] + action[1] * 18, action[2]))
             net_or_rand.append('R')
         else:
             # Choose action via epsilon greedy exploration
@@ -202,18 +197,23 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             for input_name in obs_recent.keys():
                 shaped_val = np.reshape(obs_recent[input_name], (1,) + obs_recent[input_name].shape)
                 feed_dict[obs_t_ph[input_name]] = shaped_val
-            q_x = session.run(q_x_out, feed_dict=feed_dict)
-            q_y = session.run(q_y_out, feed_dict=feed_dict)
+            q_t = session.run(q_t_out, feed_dict=feed_dict)
             q_dir = session.run(q_dir_out, feed_dict=feed_dict)
 
-            act_x, act_y, act_dir = np.argmax(q_x), np.argmax(q_y), np.argmax(q_dir)
-            print(act_x, '\t', act_y, '\t', env.map.armies[act_x, act_y])
+            valid_mask = (obs_recent['friendly'] > 1).T.reshape(18*18)
+            q_t_masked = q_t * valid_mask
+
+            act_t, act_dir = np.argmax(q_t_masked),  np.argmax(q_dir)
+            act_x, act_y = act_t % 18, act_t // 18
             action = np.array((act_x, act_y, act_dir))
+            store_action = np.array((act_t, act_dir))
             net_or_rand.append('N')
+            recent_moves.append((act_x, act_y))
 
         player_output, _ = env.step(action)
         last_obs, reward, done = player_output
-        replay_buffer.store_effect(idx, action, reward, done)
+        replay_buffer.store_effect(idx, store_action, reward, done)
+
         if save_images and len(last_obs):
             env.get_image_of_state(last_obs).save("img/Game_{}_Step_{}.png".format(play_count, game_steps))
             episode_rewards.append(reward)
@@ -226,8 +226,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
             if episode_rewards:
                 print('game %d' % play_count)
-                print('mean reward %.2f' % np.mean(episode_rewards))
-                print('recent rewards %r' % list(zip(episode_rewards, move_valid, net_or_rand)))
+                print('mean reward %.2f' % np.mean([r for r, n in zip(episode_rewards, net_or_rand) if n == 'N']))
+                print('recent rewards %r' % [r for r, n in zip(episode_rewards, net_or_rand) if n == 'N'])
+                print('recent_moves %r' % recent_moves)
                 # print('recent rewards %r' % episode_rewards)
                 # print("mean reward (100 episodes) %f" % mean_episode_reward)
                 # print("best mean reward %f" % best_mean_episode_reward)
@@ -237,6 +238,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 #print('move_validity %r' % move_valid)
                 #print('random? %r' % net_or_rand)
                 sys.stdout.flush()
+                avg_rewards.append(np.mean([r for r, n in zip(episode_rewards, net_or_rand) if n == 'N']))
+                f = open('rewards_two.txt','w')
+                f.write(str(avg_rewards))
+                f.close()
 
             save_images = False
             play_count += 1
@@ -244,6 +249,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             episode_rewards = []
             move_valid = []
             net_or_rand = []
+            recent_moves = []
 
         else:
             last_obs_np = _obs_to_np(last_obs)
@@ -274,7 +280,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             session.run(train_fn, merge_dicts(
                 {obs_t_ph[input_name]: obs_batch[input_name] for input_name in obs_batch.keys()},
                 {obs_tp1_ph[input_name]: next_obs_batch[input_name] for input_name in next_obs_batch.keys()},
-                {act_t_x_ph: act_batch[:,0], act_t_y_ph: act_batch[:,1], act_t_dir_ph: act_batch[:,2],  
+                {act_t_t_ph: act_batch[:,0], act_t_dir_ph: act_batch[:,1],  
                  rew_t_ph: rew_batch, done_mask_ph: done_mask, learning_rate: optimizer_spec.lr_schedule.value(t)}
             ))
 

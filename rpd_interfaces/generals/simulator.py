@@ -35,11 +35,21 @@ def win_loss(player, state, action, next_state, opponent_land_count):
 
 def best_point(player, state, action, next_state, opponent_land_count):
     if action:
-        return state['friendly'][action[0][0], action[0][1]]
-    return 1
+        return state['friendly'][action[0][0], action[0][1]] / np.max(state['friendly'])
+    return 0
+
+def vision_gain(player, state, action, next_state, opponent_land_count):
+    if state is None:
+        return np.sum(1 - next_state['fog']) / 3
+    return (np.sum(state['fog']) - np.sum(next_state['fog']))/ 3
+
+def army_size(player, state, action, next_state, opponent_land_count):
+    if state is None:
+        return np.sum(next_state['friendly'])
+    return np.sum(next_state['friendly']) - np.count_nonzero(state['friendly'])
 
 class Player(object):
-    def __init__(self, id_no, general_loc, reward_fn=best_point):
+    def __init__(self, id_no, general_loc, reward_fn=land_dt):
         self.id_no = id_no
         self.actions = queue.Queue()
         self.outputs = queue.Queue()
@@ -101,14 +111,17 @@ class Map(object):
         self.armies[pos[0], pos[1]] = army
         self.cities_list.append(pos)
 
-    def add_general(self, pos, player_id=-1):
+    def add_general(self, pos, player_id=-1, reward=None):
         self.num_players += 1
         if player_id == -1:
             player_id = self.num_players
         self.generals[pos[0], pos[1]] = 1
         self.owner[pos[0], pos[1]] = player_id
         self.armies[pos[0], pos[1]] = 1
-        self.players[player_id] = Player(player_id, pos)
+        if reward is not None:
+            self.players[player_id] = Player(player_id, pos, reward)
+        else:
+            self.players[player_id] = Player(player_id, pos)
         self.generals_list.append(pos)
 
     def update(self, fast_mode=False):
@@ -153,7 +166,6 @@ class Map(object):
             # if self.mountains[e_x, e_y]:
             #     player.invalid_penalty = -1
         else:
-            player.last_move = 0
             pass
             # player.invalid_penalty = -1
             # print("Invalid action {} -> {}".format(start_location, end_location))
@@ -174,7 +186,6 @@ class Map(object):
         visible_friendly = visible_armies * friendly
         visible_enemy = visible_armies * enemy
         visible_cities = visible_armies * self.cities
-
         opponent_land_count = np.sum(enemy)
         opponent_army_count = np.sum(self.armies * enemy)
 
@@ -198,6 +209,7 @@ class Map(object):
 
     def action(self, player_id, start_location, end_location): # is_half, player_id
         if player_id in self.players:
+            self.players[player_id].last_move = 0
             if 0 <= end_location[0] < _MAP_SIZE and 0 <= end_location[1] < _MAP_SIZE:
                 self.players[player_id].set_action((start_location, end_location))
             return
@@ -219,9 +231,9 @@ class GeneralsEnv:
         listdir = os.listdir(root_dir)
         self.replays = [root_dir + file for file in listdir if file.endswith('.gioreplay')]
 
-    def reset(self):
+    def reset(self, s_index=None, reward=None):
         """Sets the map using a random replay"""
-        self.map = self._get_random_map()
+        self.map = self._get_random_map(s_index, reward=reward)
         self.map.update()
         return [x.get_output() for x in self.map.players.values()]
 
@@ -260,9 +272,13 @@ class GeneralsEnv:
         dirs = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0), 4: (0, 0)}
         return initial[0] + dirs[direction][0], initial[1] + dirs[direction][1]
 
-    def _get_random_map(self):
+    def _get_random_map(self, s_index=None, reward=None):
         while True:
-            index = randint(0, len(self.replays) - 1)
+            if s_index == None:
+                index = randint(0, len(self.replays) - 1)
+            else:
+                index = s_index
+                s_index += 1
             replay = json.load(open(self.replays[index]))
             if len(replay['usernames']) == 2 and replay['mapWidth'] == 18 and replay['mapHeight'] == 18:
                 break
@@ -272,7 +288,7 @@ class GeneralsEnv:
         for i in range(len(replay['cities'])):
             m.add_city(self._flat_to_2d(replay['cities'][i]), replay['cityArmies'][i])
         for general in replay['generals']:
-            m.add_general(self._flat_to_2d(general))
+            m.add_general(self._flat_to_2d(general), reward=reward)
         return m
 
     def get_random_action(self):
@@ -288,6 +304,10 @@ class GeneralsEnv:
     def action_validity(self, player):
         player = self.map.players[player]
         return player.last_move
+
+    def valid_mask(self, state):
+        return 
+ 
 
     def _flat_to_2d(self, index):
         return index // _MAP_SIZE, index % _MAP_SIZE
