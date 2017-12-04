@@ -9,10 +9,11 @@ import numpy as np
 import tensorflow as tf
 
 from rpd_learning.dqn_utils import PiecewiseSchedule
-from rpd_learning import dqn
+from rpd_learning import dqn, a3c
 
 SUPPORTED_ENVS = {'generals', 'generals_sim', 'atari_pong', 'atari_pong_ram'}
 SUPPORTED_OPS = {'train'}
+SUPPORTED_ALGS = {'DQN', 'A3C'}
 
 def get_available_gpus():
     from tensorflow.python.client import device_lib
@@ -28,7 +29,7 @@ def get_session():
     print("AVAILABLE GPUs: ", get_available_gpus())
     return session
 
-def train(env, config):
+def train_dqn(env, config):
     # Run DQN training for the given environment
     train_params = config.get('train_params', {})
 
@@ -93,6 +94,11 @@ def train(env, config):
     if hasattr(env, 'close'):  # cleanup, if applicable
         env.close()
 
+def train_a3c(env, config):
+    num_workers = 2
+    max_batches = 4000000
+    a3c.learn(num_workers, max_batches, env, config, batch_size=32)
+
 def test(env, config):
     pass  # TODO add evaluation code
 
@@ -116,7 +122,11 @@ def run(config):
         from rpd_interfaces.atari import atari
         env = atari.AtariEnv(config['env'])
 
-    eval(config['operation'])(env, config)
+    algorithm = config.get('algorithm', 'DQN')
+    assert algorithm in SUPPORTED_ALGS, 'not a supported algorithm'
+    full_op = '_'.join((config['operation'], algorithm)).lower()
+    print('Selected algorithm: %s. Running `%s`...' % (algorithm, full_op))
+    eval(full_op)(env, config)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

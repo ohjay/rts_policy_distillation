@@ -8,15 +8,15 @@ Deep Q-network as described by CS 294-112 (goo.gl/MhA4eA).
 
 import yaml
 import os, sys
-import operator
 import datetime
-import functools, itertools
+import itertools
 import tensorflow as tf
 from collections import namedtuple
 
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
-from rpd_learning.general_utils import rm_rf, dominant_dtype
+from rpd_learning.general_utils import rm_rf
+from rpd_learning.obs_codecs import StandardCodec
 import random
 
 
@@ -85,115 +85,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     if len(set(input_dtypes)) > 1:
         print('Warning: you have inputs of different data types. You might want to keep them all the same.')
     output_names = sorted(arch['outputs'].keys(), key=lambda x: arch['outputs'][x].get('order', float('inf')))
-
-    _obs_encoding = {}  # information to be filled in about the encoding, so we don't have to determine it every time
-    _obs_encoding_dtype = dominant_dtype(input_dtypes)
-
-    def _obs_to_np(obs):
-        """Reformats observation as a single NumPy array.
-        An observation, at least from the RPD interface, will be given as an {input_name: value} dict.
-        """
-        if 'encoding_option' in _obs_encoding:
-            # Expedited route (don't need to run as many condition tests)
-            encoding_option = _obs_encoding['encoding_option']
-            if encoding_option == 1:
-                return obs[input_names[0]]
-            elif encoding_option == 2:
-                return np.stack([obs[input_name] for input_name in input_names], axis=0)
-            elif encoding_option == 3:
-                return np.concatenate([obs[input_name] for input_name in input_names], axis=_obs_encoding['axis'])
-            elif encoding_option == 4:
-                return np.concatenate([obs[input_name].flatten() for input_name in input_names])
-
-        if len(input_names) == 1:
-            _obs_encoding['encoding_option'] = 1
-            return obs[input_names[0]]  # if there is only one input, return as-is (1)
-
-        num_dims0 = len(input_shapes[0])
-        if all(len(_shape) == num_dims0 for _shape in input_shapes[1:]):
-            # If it's possible to join the inputs along a new axis, do it (2)
-            shape0 = input_shapes[0]
-            if all(_shape == shape0 for _shape in input_shapes[1:]):
-                _obs_encoding['encoding_option'] = 2
-                return np.stack([obs[input_name] for input_name in input_names], axis=0)
-
-            # If it's possible to join the inputs along an existing axis, do it (3)
-            for dim in range(num_dims0):
-                without_axis0 = shape0[:dim] + shape0[dim+1:]
-                if all(_shape[:dim] + _shape[dim+1:] == without_axis0 for _shape in input_shapes[1:]):
-                    _obs_encoding['encoding_option'] = 3
-                    _obs_encoding['axis'] = dim
-                    return np.concatenate([obs[input_name] for input_name in input_names], axis=dim)
-
-        # Return a concatenation of flattened arrays (4)
-        _obs_encoding['encoding_option'] = 4
-        return np.concatenate([obs[input_name].flatten() for input_name in input_names])
-
-    def _np_to_obs(obs_np, batched=False):
-        """Separates observation into individual inputs (the {input_name: value} dict it was originally).
-        Note: it is possible that OBS_NP represents not a single observation, but an entire batch of observations.
-
-        This the inverse of `_obs_to_np`.
-        """
-        if 'encoding_option' in _obs_encoding:
-            encoding_option = _obs_encoding['encoding_option']
-            if encoding_option == 1:
-                return {input_names[0]: obs_np}
-            elif encoding_option == 2:
-                axis = 1 if batched else 0
-                individual = np.split(obs_np, obs_np.shape[axis], axis=axis)
-                return {input_name: individual[i] for i, input_name in enumerate(input_names)}
-            elif encoding_option == 3:
-                split_indices = np.cumsum([_shape[_obs_encoding['axis']] for _shape in input_shapes])
-                axis = _obs_encoding['axis'] + 1 if batched else _obs_encoding['axis']
-                individual = np.split(obs_np, split_indices, axis=axis)
-                return {input_name: individual[i] for i, input_name in enumerate(input_names)}
-            # Encoding option #4 shall be handled below
-        else:
-            if len(input_names) == 1:
-                _obs_encoding['encoding_option'] = 1
-                return {input_names[0]: obs_np}  # inverse of (1)
-
-            num_dims0 = len(input_shapes[0])
-            if all(len(_shape) == num_dims0 for _shape in input_shapes[1:]):
-                # Inverse of (2)
-                shape0 = input_shapes[0]
-                if all(_shape == shape0 for _shape in input_shapes[1:]):
-                    _obs_encoding['encoding_option'] = 2
-                    axis = 1 if batched else 0
-                    individual = np.split(obs_np, obs_np.shape[axis], axis=axis)
-                    return {input_name: individual[i] for i, input_name in enumerate(input_names)}
-
-                # Inverse of (3)
-                for dim in range(num_dims0):
-                    without_axis0 = shape0[:dim] + shape0[dim + 1:]
-                    if all(_shape[:dim] + _shape[dim + 1:] == without_axis0 for _shape in input_shapes[1:]):
-                        _obs_encoding['encoding_option'] = 3
-                        _obs_encoding['axis'] = dim
-                        split_indices = np.cumsum([_shape[dim] for _shape in input_shapes])
-                        axis = dim + 1 if batched else dim
-                        individual = np.split(obs_np, split_indices, axis=axis)
-                        return {input_name: individual[i] for i, input_name in enumerate(input_names)}
-
-        # Inverse of (4)
-        _obs_encoding['encoding_option'] = 4
-        obs, i = {}, 0
-        for input_name in input_names:
-            _shape = arch['inputs'][input_name]['shape']
-            size = functools.reduce(operator.mul, _shape, 1)
-            if batched:
-                _shape = np.insert(_shape, 0, obs_np.shape[0])
-                try:
-                    obs[input_name] = np.reshape(obs_np[:, i:i+size], _shape)
-                except ValueError as e:
-                    print('i: %d' % i)
-                    print('obs_np shape: %r' % (obs_np.shape,))
-                    print('shape, size: %r, %d' % (_shape, size))
-                    raise
-            else:
-                obs[input_name] = np.reshape(obs_np[i:i+size], _shape)
-            i += size
-        return obs
+    _codec = StandardCodec(input_names, input_shapes, input_dtypes)
 
     # Set up placeholders
     obs_t_ph = {input_name: None for input_name in input_names}  # current observation (or state)
@@ -263,7 +155,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     get_action_kwargs = config.get('get_action_kwargs', {})
     get_random_kwargs = config.get('get_random_kwargs', {})
     last_obs, reward, done = env.reset(**reset_kwargs)
-    last_obs_np = _obs_to_np(last_obs)
+    last_obs_np = _codec.obs_to_np(last_obs)
     normalize_inputs = train_params.get('normalize_inputs', True)
     log_freq = train_params.get('log_freq', 150)
     play_count = 0
@@ -288,7 +180,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 break
 
             # Step the env and store the transition in the replay buffer
-            idx = replay_buffer.store_frame(last_obs_np, dtype=_obs_encoding_dtype)
+            idx = replay_buffer.store_frame(last_obs_np, dtype=_codec.obs_encoding_dtype)
 
             # Choose action via epsilon greedy exploration
             eps = exploration.value(t)
@@ -296,7 +188,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 # If first step, choose a random action
                 action = env.get_random_action(**get_random_kwargs)
             else:
-                obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
+                obs_recent = _codec.np_to_obs(replay_buffer.encode_recent_observation())
                 feed_dict = {}
                 for input_name in obs_recent.keys():
                     if normalize_inputs:
@@ -321,7 +213,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
             if done:
                 last_obs, reward, done = env.reset(**reset_kwargs)
-                last_obs_np = _obs_to_np(last_obs)
+                last_obs_np = _codec.obs_to_np(last_obs)
 
                 last_episode_rewards = episode_rewards
                 episode_returns.append(sum(episode_rewards))
@@ -330,7 +222,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 play_count += 1
                 game_steps = 0
             else:
-                last_obs_np = _obs_to_np(last_obs)
+                last_obs_np = _codec.obs_to_np(last_obs)
                 episode_rewards.append(reward)
                 game_steps += 1
 
@@ -343,14 +235,14 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             if t > learning_starts and t % learning_freq == 0 and replay_buffer.can_sample(batch_size):
                 # Use replay buffer to sample a batch of transitions
                 obs_batch_np, act_batch, rew_batch, next_obs_batch_np, done_mask = replay_buffer.sample(batch_size)
-                obs_batch = _np_to_obs(obs_batch_np, batched=True)
-                next_obs_batch = _np_to_obs(next_obs_batch_np, batched=True)
+                obs_batch = _codec.np_to_obs(obs_batch_np, batched=True)
+                next_obs_batch = _codec.np_to_obs(next_obs_batch_np, batched=True)
 
                 if normalize_inputs:
                     if not moments_initialized:
                         # Compute observation mean and standard deviation (for use in normalization)
                         _obs_np, _, _, _, _ = replay_buffer.sample(replay_buffer.num_in_buffer - 1)
-                        _obs = _np_to_obs(_obs_np, batched=True)
+                        _obs = _codec.np_to_obs(_obs_np, batched=True)
                         obs_mean = {input_name: np.mean(_obs[input_name], axis=0) for input_name in _obs.keys()}
                         obs_std = {input_name: np.std(_obs[input_name], axis=0) + 1e-9 for input_name in _obs.keys()}
                         _obs_np, _obs = None, None

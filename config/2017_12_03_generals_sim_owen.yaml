@@ -7,7 +7,7 @@
 
 env: generals_sim
 operation: train  # choices: (train,)
-algorithm: DQN  # choices: (DQN, A3C)
+algorithm: A3C  # choices: (DQN, A3C)
 
 train_params:
   random_seed: 1
@@ -44,7 +44,7 @@ generals_sim:
   map_height: 18
   map_width: 18
   map_player_count: 2
-  reward_fn_name: x_squares_acquired  # choice of reward function in `simulator.py`
+  reward_fn_name: move_made  # choice of reward function in `simulator.py`
 
 reset_kwargs:
   map_init: empty  # choices: (empty, random)
@@ -96,7 +96,7 @@ dqn_arch:
 
   outputs:
     action:
-      dtype: int32
+      dtype: float32
       shape: [1296]  # 18 * 18 * 4
       activation: X
 
