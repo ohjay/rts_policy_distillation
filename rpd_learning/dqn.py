@@ -16,7 +16,7 @@ from collections import namedtuple
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
 from random import random
-
+from rpd_interfaces.generals.simulator import land_dt, win_loss, best_point, vision_gain, army_size
 
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
 
@@ -168,13 +168,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     log_freq = 150
     play_count = 0
     game_steps = 0
-
-    episode_rewards = []
-    net_or_rand = []
-    recent_moves = []
     avg_rewards = []
-
     save_images = False
+    reward_fn = best_point
 
     for t in itertools.count():
         # 1. Check stopping criterion
@@ -189,7 +185,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             # action = env.get_random_action()
             action = env.get_random_semi_valid_action(1)
             store_action = np.array((action[0] + action[1] * 18, action[2]))
-            net_or_rand.append('R')
         else:
             # Choose action via epsilon greedy exploration
             obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
@@ -207,49 +202,69 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             act_x, act_y = act_t % 18, act_t // 18
             action = np.array((act_x, act_y, act_dir))
             store_action = np.array((act_t, act_dir))
-            net_or_rand.append('N')
-            recent_moves.append((act_x, act_y))
 
         player_output, _ = env.step(action)
         last_obs, reward, done = player_output
         replay_buffer.store_effect(idx, store_action, reward, done)
 
-        if save_images and len(last_obs):
-            env.get_image_of_state(last_obs).save("img/Game_{}_Step_{}.png".format(play_count, game_steps))
-            episode_rewards.append(reward)
-            move_valid.append(env.action_validity(1))
+        # 4. Log progress
+        if play_count % log_freq == 0 and model_initialized:
+            # Save network parameters
+            # q_func.save(session, t, outfolder='q_func')
+            # target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
+            player_output, _ = env.reset(10000)
+            obs_recent, reward, done = player_output
+
+            episode_rewards = []
+            recent_moves = []
+
+            while not done:
+                feed_dict = {}
+                for input_name in obs_t_ph.keys():
+                    shaped_val = np.reshape(obs_recent[input_name], (1,) + obs_recent[input_name].shape)
+                    feed_dict[obs_t_ph[input_name]] = shaped_val
+                q_t = session.run(q_t_out, feed_dict=feed_dict)
+                q_dir = session.run(q_dir_out, feed_dict=feed_dict)
+
+                valid_mask = (obs_recent['friendly'] > 1).T.reshape(18*18)
+                q_t_masked = q_t * valid_mask
+
+                act_t, act_dir = np.argmax(q_t_masked), np.argmax(q_dir)
+                act_x, act_y = act_t % 18, act_t // 18
+                action = np.array((act_x, act_y, act_dir))
+                store_action = np.array((act_t, act_dir))
+                recent_moves.append((act_x, act_y))
+                player_output, _ = env.step(action)
+                obs_recent, reward, done = player_output
+
+                env.get_image_of_state(obs_recent).save("img/Game_{}_Step_{}.png".format(play_count, game_steps))
+                episode_rewards.append(reward)
+                game_steps += 1
+
+            print('game %d' % play_count)
+            print('mean reward %.2f' % np.mean(episode_rewards))
+            print('recent rewards %r' % episode_rewards)
+            print('recent_moves %r' % recent_moves)
+            print('exploration %f' % exploration.value(t))
+            print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
+            sys.stdout.flush()
+            avg_rewards.append(np.mean(episode_rewards))
+            f = open('rewards_three.txt','w')
+            f.write(str(avg_rewards))
+            f.close()
+
+            if play_count > 5000:
+                reward_fn = land_dt
+            if play_count > 20000:
+                reward_fn = vision_gain
 
         if done:
-            player_output, _ = env.reset()
+            player_output, _ = env.reset(reward=reward_fn)
             last_obs, reward, done = player_output
             last_obs_np = _obs_to_np(last_obs)
 
-            if episode_rewards:
-                print('game %d' % play_count)
-                print('mean reward %.2f' % np.mean([r for r, n in zip(episode_rewards, net_or_rand) if n == 'N']))
-                print('recent rewards %r' % [r for r, n in zip(episode_rewards, net_or_rand) if n == 'N'])
-                print('recent_moves %r' % recent_moves)
-                # print('recent rewards %r' % episode_rewards)
-                # print("mean reward (100 episodes) %f" % mean_episode_reward)
-                # print("best mean reward %f" % best_mean_episode_reward)
-                # print("episodes %d" % len(last_episode_rewards))
-                print('exploration %f' % exploration.value(t))
-                print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
-                #print('move_validity %r' % move_valid)
-                #print('random? %r' % net_or_rand)
-                sys.stdout.flush()
-                avg_rewards.append(np.mean([r for r, n in zip(episode_rewards, net_or_rand) if n == 'N']))
-                f = open('rewards_two.txt','w')
-                f.write(str(avg_rewards))
-                f.close()
-
-            save_images = False
             play_count += 1
             game_steps = 0
-            episode_rewards = []
-            move_valid = []
-            net_or_rand = []
-            recent_moves = []
 
         else:
             last_obs_np = _obs_to_np(last_obs)
@@ -288,25 +303,3 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             if num_param_updates % target_update_freq == 0:
                 session.run(update_target_fn)
             num_param_updates += 1
-
-        # 4. Log progress
-        # last_episode_rewards = env.reward_history  # TODO separate rewards into episodes
-        # if len(last_episode_rewards) > 0:
-        #     mean_episode_reward = np.mean(last_episode_rewards[-100:])
-        # if len(last_episode_rewards) > 100:
-        #     best_mean_episode_reward = max(best_mean_episode_reward, mean_episode_reward)
-        if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
-            # print('game %d' % play_count)
-            # print('mean reward %.2f' % np.mean(last_episode_rewards))
-            # print('recent rewards %r' % last_episode_rewards)
-            # print("mean reward (100 episodes) %f" % mean_episode_reward)
-            # print("best mean reward %f" % best_mean_episode_reward)
-            # print("episodes %d" % len(last_episode_rewards))
-            # print('exploration %f' % exploration.value(t))
-            # print('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
-            # sys.stdout.flush()
-
-            # Save network parameters
-            # q_func.save(session, t, outfolder='q_func')
-            # target_q_func.save(session, t, outfolder='target')  # maybe don't need to do both
-            save_images = True

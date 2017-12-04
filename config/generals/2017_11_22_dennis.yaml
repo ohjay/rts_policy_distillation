@@ -21,9 +21,9 @@ generals_sim:
 
 dqn_arch:
   inputs:
-    # mountains:
-    #   dtype: float32 # or uint8?
-    #   shape: [18, 18]
+    mountains:
+      dtype: float32 # or uint8?
+      shape: [18, 18]
     # generals:
     #   dtype: float32
     #   shape: [18, 18]
@@ -45,7 +45,7 @@ dqn_arch:
 
   layers:
     # - inputs: [mountains, generals, hidden_terrain, fog, friendly, enemy, cities]
-    - inputs: [friendly]
+    - inputs: [friendly, mountains]
       type: conv2d
       num_outputs: 32
       kernel_size: 3

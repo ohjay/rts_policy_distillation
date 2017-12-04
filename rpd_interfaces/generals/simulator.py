@@ -19,7 +19,7 @@ _NEUTRAL = 0
 
 _MAP_SIZE = 18
 
-_TURN_LIMIT = 100
+_TURN_LIMIT = 400
 
 
 def land_dt(player, state, action, next_state, opponent_land_count):
@@ -35,7 +35,7 @@ def win_loss(player, state, action, next_state, opponent_land_count):
 
 def best_point(player, state, action, next_state, opponent_land_count):
     if action:
-        return state['friendly'][action[0][0], action[0][1]] / np.max(state['friendly'])
+        return player.last_move / np.max(state['friendly']) # state['friendly'][action[0][0], action[0][1]] / np.max(state['friendly'])
     return 0
 
 def vision_gain(player, state, action, next_state, opponent_land_count):
@@ -49,7 +49,7 @@ def army_size(player, state, action, next_state, opponent_land_count):
     return np.sum(next_state['friendly']) - np.count_nonzero(state['friendly'])
 
 class Player(object):
-    def __init__(self, id_no, general_loc, reward_fn=land_dt):
+    def __init__(self, id_no, general_loc, reward_fn=best_point):
         self.id_no = id_no
         self.actions = queue.Queue()
         self.outputs = queue.Queue()
@@ -141,6 +141,7 @@ class Map(object):
         s_x, s_y = start_location
         e_x, e_y = end_location # and self.terrain[e_x, e_y] != _MOUNTAIN
         if self.owner[s_x, s_y] == player.id_no \
+            and self.mountains[e_x, e_y] != 1\
             and self.armies[s_x, s_y] > 1 \
             and np.abs(s_x - e_x) + np.abs(s_y - e_y) == 1: 
 
@@ -244,13 +245,13 @@ class GeneralsEnv:
         """
         start_loc1 = (action1[0], action1[1])
         self.map.action(1, start_loc1, self._get_movement_for_action(start_loc1, action1[2]))
-        if action2:
+        if action2 is not None:
             start_loc2 = (action2[0], action2[1])
             self.map.action(2, start_loc2, self._get_movement_for_action(start_loc2, action2[2]))
         self.map.update()
         out1 = self.map.players[1].get_output()
         out2 = None
-        if action2:
+        if action2 is not None:
             out2 = self.map.players[2].get_output()
         return out1, out2
 
@@ -344,6 +345,9 @@ class GeneralsEnv:
                 d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[0])
                 if mountains[i,j]: # Hack
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[3])
+                if cities[i,j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[2])
+                    d.text((i * step + step//4, j * step + step//4), str(int(cities[i, j])), fill=colors[0])
                 if friendly[i, j]:
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[6])
                     general = ''
@@ -356,9 +360,6 @@ class GeneralsEnv:
                     if generals[i, j]:
                         general = '*'
                     d.text((i * step + step//4, j * step + step//4), str(int(enemy[i, j])) + general, fill=colors[0])
-                if cities[i,j]:
-                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[2])
-                    d.text((i * step + step//4, j * step + step//4), str(int(cities[i, j])), fill=colors[0])
                 if mountains[i,j]:
                     d.text((i * step + step//4, j * step + step//4), '^^', fill=colors[0])
                 if fog[i,j]:
