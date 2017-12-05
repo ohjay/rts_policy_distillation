@@ -8,14 +8,15 @@ Deep Q-network as described by CS 294-112 (goo.gl/MhA4eA).
 
 import yaml
 import os, sys
-import operator
 import datetime
-import functools, itertools
+import itertools
 import tensorflow as tf
 from collections import namedtuple
 
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
+from rpd_learning.general_utils import rm_rf
+from rpd_learning.obs_codecs import StandardCodec
 import random
 
 
@@ -64,7 +65,11 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
     # Set up checkpoint folder
     checkpoint_dir = os.path.join('.checkpoints', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
-    os.makedirs(checkpoint_dir)
+    try:
+        os.makedirs(checkpoint_dir)
+    except OSError:
+        rm_rf(checkpoint_dir, 'ERROR: %s already exists! Delete this folder? (True/False)' % checkpoint_dir)
+        os.makedirs(checkpoint_dir)
     with open(os.path.join(checkpoint_dir, 'config_in.yaml'), 'w') as outfile:
         yaml.dump(config, outfile, default_flow_style=False)  # save the config as backup
 
@@ -73,68 +78,35 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     ###############
 
     arch = config['dqn_arch']
+    input_names = sorted(arch['inputs'].keys())
+    assert len(input_names) > 0, 'observations are required'
+    input_shapes = [arch['inputs'][input_name]['shape'] for input_name in input_names]
+    input_dtypes = [arch['inputs'][input_name]['dtype'] for input_name in input_names]
+    if len(set(input_dtypes)) > 1:
+        print('Warning: you have inputs of different data types. You might want to keep them all the same.')
     output_names = sorted(arch['outputs'].keys(), key=lambda x: arch['outputs'][x].get('order', float('inf')))
-
-    # TODO: inspect this
-    def _obs_to_np(obs):
-        """Reformats observation as a single NumPy array.
-        An observation, at least from the RPD interface, will be given as an {input_name: value} dict.
-        """
-        return np.concatenate([obs[input_name].flatten() for input_name in sorted(arch['inputs'].keys())])
-
-    # TODO: inspect this
-    def _np_to_obs(obs_np, batched=False):
-        """Separates observation into individual inputs (the {input_name: value} dict it was originally).
-        This the inverse of `_obs_to_np`.
-        """
-        obs = {}
-        i = 0
-        for input_name in sorted(arch['inputs'].keys()):
-            shape = arch['inputs'][input_name]['shape']
-            size = functools.reduce(operator.mul, shape, 1)
-            if batched or obs_np.shape[0] == batch_size:
-                shape = np.insert(shape, 0, obs_np.shape[0])
-                try:
-                    obs[input_name] = np.reshape(obs_np[:, i:i+size], shape)
-                except ValueError as e:
-                    print('i: %d' % i)
-                    print('obs_np shape: %r' % (obs_np.shape,))
-                    print('shape, size: %r, %d' % (shape, size))
-                    raise
-            else:
-                obs[input_name] = np.reshape(obs_np[i:i+size], shape)
-            i += size
-        return obs
+    _codec = StandardCodec(input_names, input_shapes, input_dtypes)
 
     # Set up placeholders
-    obs_t_ph = {input_name: None for input_name in arch['inputs'].keys()}  # current observation (or state)
-    obs_t_ph_float = {input_name: None for input_name in arch['inputs'].keys()}
-    for input_name in obs_t_ph:
-        info = arch['inputs'][input_name]
-        dtype, shape = info['dtype'], info['shape']
+    obs_t_ph = {input_name: None for input_name in input_names}  # current observation (or state)
+    obs_t_ph_float = {input_name: None for input_name in input_names}
+    obs_tp1_ph = {input_name: None for input_name in input_names}  # next observation (or state)
+    obs_tp1_ph_float = {input_name: None for input_name in input_names}
+    for input_name, dtype, shape in zip(input_names, input_dtypes, input_shapes):
         obs_t_ph[input_name] = tf.placeholder(getattr(tf, dtype), [None] + list(shape))
-        if dtype == 'float32':
-            obs_t_ph_float[input_name] = obs_t_ph[input_name]
-        else:  # casting to float on GPU ensures lower data transfer times
-            obs_t_ph_float[input_name] = tf.cast(obs_t_ph[input_name], tf.float32) / 255.0
-    act_t_ph = {}
-    for output_name in output_names:
-        act_t_ph[output_name] = tf.placeholder(tf.int32, [None])  # current action
-    rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
-    obs_tp1_ph = {input_name: None for input_name in arch['inputs'].keys()}  # next observation (or state)
-    obs_tp1_ph_float = {input_name: None for input_name in arch['inputs'].keys()}
-    for input_name in obs_tp1_ph:
-        info = arch['inputs'][input_name]
-        dtype, shape = info['dtype'], info['shape']
         obs_tp1_ph[input_name] = tf.placeholder(getattr(tf, dtype), [None] + list(shape))
         if dtype == 'float32':
+            obs_t_ph_float[input_name] = obs_t_ph[input_name]
             obs_tp1_ph_float[input_name] = obs_tp1_ph[input_name]
-        else:
+        else:  # casting to float on GPU ensures lower data transfer times
+            obs_t_ph_float[input_name] = tf.cast(obs_t_ph[input_name], tf.float32) / 255.0
             obs_tp1_ph_float[input_name] = tf.cast(obs_tp1_ph[input_name], tf.float32) / 255.0
+    act_t_ph = {output_name: tf.placeholder(tf.int32, [None]) for output_name in output_names}  # current action
+    rew_t_ph = tf.placeholder(tf.float32, [None])  # current reward
     done_mask_ph = tf.placeholder(tf.float32, [None])  # end of episode mask (1 if next state = end of an episode)
 
     # Create networks (for current/next Q-values)
-    q_func = Model(arch, inputs=obs_t_ph_float, scope='q_func', reuse=False)  # model to use for computing the q-function
+    q_func = Model(arch, inputs=obs_t_ph_float, scope='q_func', reuse=False)
     target_q_func = Model(arch, inputs=obs_tp1_ph_float, scope='target_q_func', reuse=False)
 
     # Compute the Bellman error
@@ -144,15 +116,15 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         _num = arch['outputs'][output_name]['shape'][0]
         q_out = q_func.outputs[output_name]
         target_out = target_q_func.outputs[output_name]
-        all_q_j.append(tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1))  # TODO: encoded correctly via `tf.one_hot`?
+        all_q_j.append(tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1))
         all_y_j.append(rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1)))
 
     total_error = 0
     for q_j, y_j in zip(all_q_j, all_y_j):
         # scalar valued tensor representing Bellman error (error based on current and next Q-values)
         total_error += tf.reduce_mean(tf.square(y_j - q_j))
-    q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')  # all vars in Q-function network
-    target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')  # all vars in target network
+    q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')
+    target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
 
     # Construct optimization op (with gradient clipping)
     learning_rate = tf.placeholder(tf.float32, (), name='learning_rate')
@@ -180,8 +152,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     num_param_updates = 0
     reset_kwargs = config.get('reset_kwargs', {})
     step_kwargs = config.get('step_kwargs', {})
+    get_action_kwargs = config.get('get_action_kwargs', {})
+    get_random_kwargs = config.get('get_random_kwargs', {})
     last_obs, reward, done = env.reset(**reset_kwargs)
-    last_obs_np = _obs_to_np(last_obs)
+    last_obs_np = _codec.obs_to_np(last_obs)
     normalize_inputs = train_params.get('normalize_inputs', True)
     log_freq = train_params.get('log_freq', 150)
     play_count = 0
@@ -206,15 +180,15 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 break
 
             # Step the env and store the transition in the replay buffer
-            idx = replay_buffer.store_frame(last_obs_np)
+            idx = replay_buffer.store_frame(last_obs_np, dtype=_codec.obs_encoding_dtype)
 
             # Choose action via epsilon greedy exploration
             eps = exploration.value(t)
             if not model_initialized or random.random() < eps:
                 # If first step, choose a random action
-                action = env.get_random_action(semi_valid=True, player_id=1)
+                action = env.get_random_action(**get_random_kwargs)
             else:
-                obs_recent = _np_to_obs(replay_buffer.encode_recent_observation())
+                obs_recent = _codec.np_to_obs(replay_buffer.encode_recent_observation())
                 feed_dict = {}
                 for input_name in obs_recent.keys():
                     if normalize_inputs:
@@ -224,7 +198,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
                 fetches = [q_func.outputs[output_name] for output_name in output_names]
                 q_values = session.run(fetches, feed_dict=feed_dict)
-                action = env.get_valid_action_from_q_values(q_values)
+                action = env.get_action_from_q_values(q_values, **get_action_kwargs)
 
             last_obs, reward, done = env.step(action, **step_kwargs)
             replay_buffer.store_effect(idx, action, reward, done)
@@ -234,12 +208,12 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     run_dir = os.path.join('img', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
                     if not os.path.exists(run_dir):
                         os.makedirs(run_dir)
-                        print('Created directory at %s.' % run_dir)
+                        print('Saving images to %s.\n' % run_dir)
                     image.save("{}/Game_{}_Step_{}.png".format(run_dir, play_count, game_steps))
 
             if done:
                 last_obs, reward, done = env.reset(**reset_kwargs)
-                last_obs_np = _obs_to_np(last_obs)
+                last_obs_np = _codec.obs_to_np(last_obs)
 
                 last_episode_rewards = episode_rewards
                 episode_returns.append(sum(episode_rewards))
@@ -248,7 +222,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 play_count += 1
                 game_steps = 0
             else:
-                last_obs_np = _obs_to_np(last_obs)
+                last_obs_np = _codec.obs_to_np(last_obs)
                 episode_rewards.append(reward)
                 game_steps += 1
 
@@ -261,14 +235,14 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             if t > learning_starts and t % learning_freq == 0 and replay_buffer.can_sample(batch_size):
                 # Use replay buffer to sample a batch of transitions
                 obs_batch_np, act_batch, rew_batch, next_obs_batch_np, done_mask = replay_buffer.sample(batch_size)
-                obs_batch = _np_to_obs(obs_batch_np)
-                next_obs_batch = _np_to_obs(next_obs_batch_np)
+                obs_batch = _codec.np_to_obs(obs_batch_np, batched=True)
+                next_obs_batch = _codec.np_to_obs(next_obs_batch_np, batched=True)
 
                 if normalize_inputs:
                     if not moments_initialized:
                         # Compute observation mean and standard deviation (for use in normalization)
                         _obs_np, _, _, _, _ = replay_buffer.sample(replay_buffer.num_in_buffer - 1)
-                        _obs = _np_to_obs(_obs_np, batched=True)
+                        _obs = _codec.np_to_obs(_obs_np, batched=True)
                         obs_mean = {input_name: np.mean(_obs[input_name], axis=0) for input_name in _obs.keys()}
                         obs_std = {input_name: np.std(_obs[input_name], axis=0) + 1e-9 for input_name in _obs.keys()}
                         _obs_np, _obs = None, None
@@ -318,10 +292,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     print_and_log('mean of recent rewards %.2f' % np.mean(last_episode_rewards))
                     print_and_log('recent rewards %r' % last_episode_rewards)
 
+                # Save network parameters and images from next episode
                 if train_params.get('save_model', True):
-                    # Save network parameters and images from next episode
                     q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
-                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))  # don't need both?
+                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))
                 save_images = train_params.get('save_images', True)
 
                 print_and_log('')  # newline

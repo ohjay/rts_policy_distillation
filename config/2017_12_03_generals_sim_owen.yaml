@@ -7,30 +7,29 @@
 
 env: generals_sim
 operation: train  # choices: (train,)
-algorithm: DQN  # choices: (DQN, A3C)
+algorithm: A3C  # choices: (DQN, A3C)
 
 train_params:
   random_seed: 1
   num_timesteps: 40000000
   lr_multiplier: 0.1
   replay_buffer_size: 1000000
-  batch_size: 128
-  gamma: 0.00
+  batch_size: 64
+  gamma: 0.99
   learning_starts: 50000
   learning_freq: 1
   frame_history_len: 1
-  target_update_freq: 5000
+  target_update_freq: 10000
   grad_norm_clipping: 10
   lr_schedule:  # can use any variables defined in `main.train`
-    - 0: 2e-3 * lr_multiplier
-    - num_iterations / 10: 1e-3 * lr_multiplier
-    - num_iterations / 2: 1e-4 * lr_multiplier
+    - 0: 1e-4 * lr_multiplier
+    - num_iterations / 10: 1e-4 * lr_multiplier
+    - num_iterations / 2: 5e-5 * lr_multiplier
   exploration_schedule:
     - 0: 0.80
-    - 1e6: 0.20
-    - num_iterations / 2: 0.10
-    - num_iterations: 0.01
-  normalize_inputs: True
+    - 1e6: 0.10
+    - num_iterations / 2: 0.01
+  normalize_inputs: False
   log_freq: 50  # log every X episodes
   log_recent_rewards: True
   save_model: False
@@ -78,18 +77,28 @@ dqn_arch:
     - inputs: [friendly]
       type: conv2d
       num_outputs: 32
+      kernel_size: 8
+      stride: 4
+      activation: relu
+    - type: conv2d
+      num_outputs: 64
+      kernel_size: 4
+      stride: 2
+      activation: relu
+    - type: conv2d
+      num_outputs: 64
       kernel_size: 3
       stride: 1
       activation: relu
     - type: fc
-      num_outputs: 256
+      num_outputs: 128
       activation: relu
 
   outputs:
-#    action:
-#      dtype: int32
-#      shape: [1296]  # 18 * 18 * 4
-#      activation: X
+    action:
+      dtype: float32
+      shape: [1296]  # 18 * 18 * 4
+      activation: X
 
 #    target_x:
 #      dtype: int32
@@ -107,13 +116,13 @@ dqn_arch:
 #      activation: X
 #      order: 2
 
-    target_xy:
-      dtype: int32
-      shape: [324]
-      activation: X
-      order: 0
-    direction:
-      dtype: int32
-      shape: [4]  # five actions centered around active square
-      activation: X
-      order: 1
+#    target_xy:
+#      dtype: int32
+#      shape: [324]
+#      activation: X
+#      order: 0
+#    direction:
+#      dtype: int32
+#      shape: [4]  # five actions centered around active square
+#      activation: X
+#      order: 1

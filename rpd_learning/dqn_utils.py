@@ -125,14 +125,13 @@ class LinearSchedule(Schedule):
 
 class ReplayBuffer(object):
     def __init__(self, size, frame_history_len):
-        """This is a memory efficient implementation of the replay buffer.
+        """This is a memory-efficient implementation of the replay buffer.
 
         The specific memory optimizations use here are:
             - only store each frame once rather than k times
               even if every observation normally consists of k last frames
             - store frames as np.uint8 (actually it is most time-performance
-              to cast them back to float32 on GPU to minimize memory transfer
-              time)
+              to cast them back to float32 on GPU to minimize memory transfer time)
             - store frame_t and frame_(t+1) in the same buffer.
 
         For the typical use case in Atari Deep RL buffer with 1M frames the total
@@ -242,14 +241,16 @@ class ReplayBuffer(object):
             frames.append(self.obs[idx % self.size])
         return np.concatenate(frames, axis=-1)
 
-    def store_frame(self, frame):
+    def store_frame(self, frame, dtype='uint8'):
         """Store a single frame in the buffer at the next available index,
         overwriting old frames if necessary.
 
         Parameters
         ----------
         frame: np.array
-            The frame to be stored; assumed to be of dtype np.uint8
+            The frame to be stored.
+        dtype: str
+            Data type for frames (i.e. observations).
 
         Returns
         -------
@@ -257,7 +258,7 @@ class ReplayBuffer(object):
             Index at which the frame is stored. To be used for `store_effect` later.
         """
         if self.obs is None:
-            self.obs = np.empty([self.size] + list(frame.shape), dtype=np.uint8)  # TODO: don't restrict to uint8
+            self.obs = np.empty([self.size] + list(frame.shape), dtype=getattr(np, dtype))
             
         self.obs[self.next_idx] = frame
 

@@ -5,8 +5,9 @@
 # RUN INFO
 # --------
 
-env: atari_pong_ram
+env: atari_pong
 operation: train  # choices: (train,)
+algorithm: A3C
 
 train_params:
   random_seed: 0
@@ -17,7 +18,7 @@ train_params:
   gamma: 0.99
   learning_starts: 50000
   learning_freq: 4
-  frame_history_len: 1
+  frame_history_len: 4
   target_update_freq: 10000
   grad_norm_clipping: 10
   lr_schedule:  # can use any variables defined in `main.train`
@@ -25,7 +26,7 @@ train_params:
     - num_iterations / 10: 1e-4 * lr_multiplier
     - num_iterations / 2: 5e-5 * lr_multiplier
   exploration_schedule:
-    - 0: 0.20
+    - 0: 1.00
     - 1e6: 0.10
     - num_iterations / 2: 0.01
   normalize_inputs: False
@@ -34,25 +35,39 @@ train_params:
   save_model: False
   save_images: False
 
+# ENV-SPECIFIC INFO
+# ------------------
+atari_pong:
+  monitor: False
+
 # MODEL ARCHITECTURE
 # ------------------
 
 dqn_arch:
   inputs:
-    ram_in:
+    img_in:
       dtype: uint8
-      shape: [128]  # as determined by `env.observation_space.shape`
+      shape: [84, 84, 4]  # (img_h, img_w, frame_history_len * img_c)
 
   layers:
-    - inputs: [ram_in]
-      type: fc
-      num_outputs: 256
+    - inputs: [img_in]
+      type: conv2d
+      num_outputs: 32
+      kernel_size: 8
+      stride: 4
       activation: relu
-    - type: fc
-      num_outputs: 128
-      activation: relu
-    - type: fc
+    - type: conv2d
       num_outputs: 64
+      kernel_size: 4
+      stride: 2
+      activation: relu
+    - type: conv2d
+      num_outputs: 64
+      kernel_size: 3
+      stride: 1
+      activation: relu
+    - type: fc
+      num_outputs: 512
       activation: relu
 
   outputs:

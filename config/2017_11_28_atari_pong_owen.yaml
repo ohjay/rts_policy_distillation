@@ -6,7 +6,7 @@
 # --------
 
 env: atari_pong
-operation: train  # (train,)
+operation: train  # choices: (train,)
 
 train_params:
   random_seed: 0

@@ -16,7 +16,7 @@ from rpd_interfaces.interfaces import Environment
 _PONG_INDEX = 3
 
 class AtariEnv(Environment):
-    def __init__(self, env_name, expt_dir='tmp/vid_dir/'):
+    def __init__(self, env_name, expt_dir='tmp/vid_dir/', monitor=True):
         self.base_env, self.env = None, None
         self.obs_input_name = None
         if env_name == 'atari_pong':
@@ -24,8 +24,10 @@ class AtariEnv(Environment):
             task = benchmark.tasks[_PONG_INDEX]
             print('max timesteps: %d' % task.max_timesteps)
             self.base_env = gym.make(task.env_id)
-            self.env = wrappers.Monitor(self.base_env, os.path.join(expt_dir, 'gym'),
-                                        force=True, video_callable=lambda i: False)
+            self.env = self.base_env
+            if monitor:
+                self.env = wrappers.Monitor(self.env, os.path.join(expt_dir, 'gym'),
+                                            force=True, video_callable=lambda i: False)
             self.env = wrap_deepmind(self.env)
             img_h, img_w, img_c = self.env.observation_space.shape
             print('img_h: %d' % img_h)
@@ -55,7 +57,7 @@ class AtariEnv(Environment):
     def get_random_action(self, **kwargs):
         return np.array((self.env.action_space.sample(),))
 
-    def get_valid_action_from_q_values(self, q_values):
+    def get_action_from_q_values(self, q_values, **kwargs):
         return np.array((np.argmax(q_values),))
 
     def step(self, action, **kwargs):
