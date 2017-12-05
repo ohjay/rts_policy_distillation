@@ -44,13 +44,13 @@ generals_sim:
   map_height: 18
   map_width: 18
   map_player_count: 2
-  reward_fn_name: move_made  # choice of reward function in `simulator.py`
 
 reset_kwargs:
   map_init: empty  # choices: (empty, random)
   player_id: 1
   preprocessors:  # choice of preprocessors from `generals_sim.py`
     - add_dimension
+  reward_fn_name: move_made  # choice of reward function in `simulator.py`
 
 step_kwargs:
   player_id: 1

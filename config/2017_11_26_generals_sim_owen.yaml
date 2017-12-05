@@ -19,16 +19,17 @@ train_params:
   learning_starts: 50000
   learning_freq: 1
   frame_history_len: 1
-  target_update_freq: 10000
+  target_update_freq: 5000
   grad_norm_clipping: 10
   lr_schedule:  # can use any variables defined in `main.train`
-    - 0: 1e-4 * lr_multiplier
-    - num_iterations / 10: 1e-4 * lr_multiplier
-    - num_iterations / 2: 5e-5 * lr_multiplier
+    - 0: 2e-3 * lr_multiplier
+    - num_iterations / 10: 1e-3 * lr_multiplier
+    - num_iterations / 2: 1e-4 * lr_multiplier
   exploration_schedule:
     - 0: 0.80
-    - 1e6: 0.10
-    - num_iterations / 2: 0.01
+    - 1e6: 0.20
+    - num_iterations / 2: 0.10
+    - num_iterations: 0.01
   normalize_inputs: True
   log_freq: 50  # log every X episodes
   log_recent_rewards: True
@@ -44,13 +45,13 @@ generals_sim:
   map_height: 18
   map_width: 18
   map_player_count: 2
-  reward_fn_name: move_made  # choice of reward function in `simulator.py`
 
 reset_kwargs:
   map_init: empty  # choices: (empty, random)
   player_id: 1
   preprocessors:  # choice of preprocessors from `generals_sim.py`
     - add_dimension
+  reward_fn_name: move_made  # choice of reward function in `simulator.py`
 
 step_kwargs:
   player_id: 1
@@ -77,11 +78,11 @@ dqn_arch:
     - inputs: [friendly]
       type: conv2d
       num_outputs: 32
-      kernel_size: 8
-      stride: 4
+      kernel_size: 3
+      stride: 1
       activation: relu
     - type: fc
-      num_outputs: 8
+      num_outputs: 256
       activation: relu
 
   outputs:

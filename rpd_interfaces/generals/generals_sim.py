@@ -26,17 +26,15 @@ NUM_DIRECTIONS = 4
 def add_dimension(obs):
     if obs is not None:
         for _name in ('mountains', 'generals', 'hidden_terrain', 'fog',
-                      'friendly', 'enemy', 'cities', 'opp_land', 'opp_army'):
+                      'friendly', 'enemy', 'cities'):
             obs[_name] = obs[_name][..., None]
     return obs
 
 
 class GeneralsEnv(Environment):
-    def __init__(self, root_dir, reward_fn_name=None, action_space=None):
+    def __init__(self, root_dir, action_space=None):
         self.replays = [root_dir + filename for filename in os.listdir(root_dir) if filename.endswith('.gioreplay')]
         self.map = None
-        self.reward_fn_name = reward_fn_name
-        print('Loaded reward function as `%s.`' % self.reward_fn_name)
         if type(action_space) == dict:
             self.action_space = collections.OrderedDict()
             for output_name in sorted(action_space.keys(), key=lambda x: action_space[x].get('order', float('inf'))):
@@ -45,12 +43,13 @@ class GeneralsEnv(Environment):
             self.action_space = DEFAULT_ACTION_SPACE
         print('Loaded action space as %r.' % self.action_space)
 
-    def reset(self, map_init='random', player_id=1, preprocessors=()):
+    def reset(self, map_init='random', player_id=1, preprocessors=(), s_index=None, reward_fn_name=None):
         """Sets the map using a random replay."""
         if map_init.lower() == 'empty':
-            self.map = self._get_random_map(include_mountains=False, include_cities=False)
+            self.map = self._get_random_map(include_mountains=False, include_cities=False,
+                                            s_index=s_index, reward_fn_name=reward_fn_name)
         elif map_init.lower() == 'random':
-            self.map = self._get_random_map()
+            self.map = self._get_random_map(s_index=s_index, reward_fn_name=reward_fn_name)
         else:
             raise NotImplementedError('map init "%s" not supported' % map_init)
         self.map.update()
@@ -101,13 +100,17 @@ class GeneralsEnv(Environment):
     def _flat_to_2d(self, index):
         return index // MAP_SIZE, index % MAP_SIZE
 
-    def _get_random_map(self, include_mountains=True, include_cities=True):
+    def _get_random_map(self, include_mountains=True, include_cities=True, s_index=None, reward_fn_name=None):
         while True:
-            index = randint(0, len(self.replays) - 1)
+            if s_index is None:
+                index = randint(0, len(self.replays) - 1)
+            else:
+                index = s_index
+                s_index += 1
             replay = json.load(open(self.replays[index]))
             if len(replay['usernames']) == 2 and replay['mapWidth'] == 18 and replay['mapHeight'] == 18:
                 break
-        m = Map(self.reward_fn_name)
+        m = Map()
         if include_mountains:
             for mountain in replay['mountains']:
                 m.add_mountain(self._flat_to_2d(mountain))
@@ -115,7 +118,7 @@ class GeneralsEnv(Environment):
             for i in range(len(replay['cities'])):
                 m.add_city(self._flat_to_2d(replay['cities'][i]), replay['cityArmies'][i])
         for general in replay['generals']:
-            m.add_general(self._flat_to_2d(general))
+            m.add_general(self._flat_to_2d(general), reward_fn_name=reward_fn_name)
         return m
 
     def step(self, action1, action2=None, player_id=1, preprocessors=()):
@@ -126,14 +129,14 @@ class GeneralsEnv(Environment):
         target_x1, target_y1, direction1 = self._decode_action(action1)
         start_loc1 = (target_x1, target_y1)
         self.map.action(1, start_loc1, self._get_movement_for_action(start_loc1, direction1))
-        if action2:
+        if action2 is not None:
             target_x2, target_y2, direction2 = self._decode_action(action2)
             start_loc2 = (target_x2, target_y2)
             self.map.action(2, start_loc2, self._get_movement_for_action(start_loc2, direction2))
         self.map.update()
         out1 = self.map.players[1].get_output()
         out2 = None
-        if action2:
+        if action2 is not None:
             out2 = self.map.players[2].get_output()
         for prep in preprocessors:
             _prep = eval(prep)
@@ -226,6 +229,9 @@ class GeneralsEnv(Environment):
                 d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[0])
                 if mountains[i, j]:
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[3])
+                if cities[i, j]:
+                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[2])
+                    d.text((i * step + step // 4, j * step + step // 4), str(int(cities[i, j])), fill=colors[0])
                 if friendly[i, j]:
                     d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[6])
                     general = ''
@@ -238,9 +244,6 @@ class GeneralsEnv(Environment):
                     if generals[i, j]:
                         general = '*'
                     d.text((i * step + step // 4, j * step + step // 4), str(int(enemy[i, j])) + general, fill=colors[0])
-                if cities[i, j]:
-                    d.rectangle((i * step, j * step, i * step + step, j * step + step), fill=colors[2])
-                    d.text((i * step + step // 4, j * step + step // 4), str(int(cities[i, j])), fill=colors[0])
                 if mountains[i, j]:
                     d.text((i * step + step // 4, j * step + step // 4), '^^', fill=colors[0])
                 if fog[i, j]:

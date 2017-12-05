@@ -13,28 +13,43 @@ _CITY_MAX_ARMY = 40
 _NEUTRAL = 0
 _TURN_LIMIT = 100
 
-def land_dt(player, state, next_state, opponent_land_count):
+def land_dt(player, state, action, next_state, opponent_land_count):
     if state is None:
         return np.count_nonzero(next_state['friendly'])
     return np.count_nonzero(next_state['friendly']) - np.count_nonzero(state['friendly'])
 
-def x_squares_acquired(player, state, next_state, opponent_land_count):
+def x_squares_acquired(player, state, action, next_state, opponent_land_count):
     """Goal: acquire X squares as quickly as possible."""
     if state is None:
         return 1 if np.count_nonzero(next_state['friendly']) >= 20 else 0
     return 1 if np.count_nonzero(next_state['friendly']) >= 20 else 0
 
-def move_made(player, state, next_state, opponent_land_count):
+def move_made(player, state, action, next_state, opponent_land_count):
     """Assumes that the opponent is NOT making moves."""
     if state is None:
         return 0.0
     return int(state['last_location'] != next_state['last_location'])
 
-def win_loss(player, state, next_state, opponent_land_count):
+def win_loss(player, state, action, next_state, opponent_land_count):
     if not opponent_land_count:
         return 1
     else:
         return 0
+
+def best_point(player, state, action, next_state, opponent_land_count):
+    if action:
+        return player.last_move / np.max(state['friendly'])
+    return 0
+
+def vision_gain(player, state, action, next_state, opponent_land_count):
+    if state is None:
+        return np.sum(1 - next_state['fog']) / 3
+    return (np.sum(state['fog']) - np.sum(next_state['fog'])) / 3
+
+def army_size(player, state, action, next_state, opponent_land_count):
+    if state is None:
+        return np.sum(next_state['friendly'])
+    return np.sum(next_state['friendly']) - np.count_nonzero(state['friendly'])
 
 class Player(object):
     def __init__(self, id_no, general_loc, reward_fn_name='land_dt'):
@@ -43,6 +58,8 @@ class Player(object):
         self.outputs = queue.Queue()
         self.rewards = queue.Queue()
         self.last_state = None
+        self.last_action = None
+        self.last_move = 0
         self.last_location = general_loc
         self.reward_fn = eval(reward_fn_name)
         self.general_loc = general_loc
@@ -52,25 +69,25 @@ class Player(object):
         self.actions.put(action)
 
     def get_action(self):
-        return self.actions.get()
+        self.last_action = self.actions.get()
+        return self.last_action
 
     def set_output(self, obs):
         self.outputs.put(obs)
 
     def get_output(self):
-        new_state = self.outputs.get()
-        self.last_state = new_state[0]
+        new_output = self.outputs.get()
+        self.last_state = new_output[0]
         self.invalid_penalty = 0
-        return new_state
+        return new_output
 
     def update_location(self, location):
         self.last_location = location
 
 class Map(object):
-    def __init__(self, reward_fn_name=None):
+    def __init__(self):
         self.width = MAP_SIZE
         self.height = MAP_SIZE
-        self.reward_fn_name = reward_fn_name
 
         self.mountains = np.zeros((MAP_SIZE, MAP_SIZE))
         self.cities = np.zeros((MAP_SIZE, MAP_SIZE))
@@ -97,15 +114,15 @@ class Map(object):
         self.armies[pos[0], pos[1]] = army
         self.cities_list.append(pos)
 
-    def add_general(self, pos, player_id=-1):
+    def add_general(self, pos, player_id=-1, reward_fn_name=None):
         self.num_players += 1
         if player_id == -1:
             player_id = self.num_players
         self.generals[pos[0], pos[1]] = 1
         self.owner[pos[0], pos[1]] = player_id
         self.armies[pos[0], pos[1]] = 1
-        if self.reward_fn_name is not None:
-            self.players[player_id] = Player(player_id, pos, self.reward_fn_name)
+        if reward_fn_name is not None:
+            self.players[player_id] = Player(player_id, pos, reward_fn_name)
         else:
             self.players[player_id] = Player(player_id, pos)
         self.generals_list.append(pos)
@@ -132,12 +149,14 @@ class Map(object):
         if start_location == end_location:
             return
         s_x, s_y = start_location
-        e_x, e_y = end_location  # and self.terrain[e_x, e_y] != _MOUNTAIN
+        e_x, e_y = end_location
         if self.owner[s_x, s_y] == player.id_no \
+                and self.mountains[e_x, e_y] != 1 \
                 and self.armies[s_x, s_y] > 1 \
                 and np.abs(s_x - e_x) + np.abs(s_y - e_y) == 1:
 
             moving = self.armies[s_x, s_y] - 1
+            player.last_move = moving
             self.armies[s_x, s_y] = 1
             if self.owner[e_x, e_y] == player.id_no:
                 self.armies[e_x, e_y] += moving
@@ -151,16 +170,8 @@ class Map(object):
                         self.owner -= defeated_map * diff
                         self.num_players -= 1
                     self.armies[e_x, e_y] *= -1
-                    prev_owner = self.owner[e_x, e_y]
                     self.owner[e_x, e_y] = player.id_no
             player.update_location(end_location)
-
-            # if self.mountains[e_x, e_y]:
-            #     player.invalid_penalty = -1
-        else:
-            pass
-            # player.invalid_penalty = -1
-            # print("Invalid action {} -> {}".format(start_location, end_location))
 
     def _generate_obs(self, player):
         friendly = self.owner == player.id_no
@@ -178,7 +189,6 @@ class Map(object):
         visible_friendly = visible_armies * friendly
         visible_enemy = visible_armies * enemy
         visible_cities = visible_armies * self.cities
-
         opponent_land_count = np.sum(enemy)
         opponent_army_count = np.sum(self.armies * enemy)
 
@@ -194,7 +204,8 @@ class Map(object):
             'opp_army':       opponent_army_count,
             'last_location':  player.last_location
         }
-        reward = player.reward_fn(player, player.last_state, new_state, opponent_land_count) + player.invalid_penalty
+        reward = player.invalid_penalty + player.reward_fn(player, player.last_state, player.last_action,
+                                                           new_state, opponent_land_count)
         done = self.owner[player.general_loc] != player.id_no or self.num_players == 1 or self.turn_count >= _TURN_LIMIT
         player.set_output((new_state, reward, done))
 
@@ -211,6 +222,7 @@ class Map(object):
 
     def action(self, player_id, start_location, end_location):  # is_half, player_id
         if player_id in self.players:
+            self.players[player_id].last_move = 0
             if 0 <= end_location[0] < MAP_SIZE and 0 <= end_location[1] < MAP_SIZE:
                 self.players[player_id].set_action((start_location, end_location))
             return
