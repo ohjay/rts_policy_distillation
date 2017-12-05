@@ -37,8 +37,10 @@ class AtariEnv(Environment):
             self.obs_input_name = 'img_in'
         elif env_name == 'atari_pong_ram':
             self.base_env = gym.make('Pong-ram-v0')
-            self.env = wrappers.Monitor(self.base_env, os.path.join(expt_dir, 'gym'),
-                                        force=True, video_callable=lambda i: False)
+            self.env = self.base_env
+            if monitor:
+                self.env = wrappers.Monitor(self.env, os.path.join(expt_dir, 'gym'),
+                                            force=True, video_callable=lambda i: False)
             self.env = wrap_deepmind_ram(self.env)
             print('input_shape: %r' % self.env.observation_space.shape)
             print('num_actions: %r' % self.env.action_space.n)
