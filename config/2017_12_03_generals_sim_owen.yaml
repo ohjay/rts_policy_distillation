@@ -12,7 +12,7 @@ algorithm: A3C  # choices: (DQN, A3C)
 train_params:
   random_seed: 1
   num_timesteps: 40000000
-  lr_multiplier: 0.1
+  lr_multiplier: 1.0
   replay_buffer_size: 1000000
   batch_size: 64
   gamma: 0.99
@@ -112,7 +112,7 @@ dqn_arch:
 #      order: 1
 #    direction:
 #      dtype: int32
-#      shape: [4]  # five actions centered around active square
+#      shape: [4]  # four actions centered around active square
 #      activation: X
 #      order: 2
 
@@ -123,6 +123,6 @@ dqn_arch:
 #      order: 0
 #    direction:
 #      dtype: int32
-#      shape: [4]  # five actions centered around active square
+#      shape: [4]  # four actions centered around active square
 #      activation: X
 #      order: 1

@@ -12,7 +12,7 @@ algorithm: DQN  # choices: (DQN, A3C)
 train_params:
   random_seed: 1
   num_timesteps: 40000000
-  lr_multiplier: 0.1
+  lr_multiplier: 1.0
   replay_buffer_size: 1000000
   batch_size: 128
   gamma: 0.00
