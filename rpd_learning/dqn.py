@@ -112,18 +112,13 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     target_q_func = Model(arch, inputs=obs_tp1_ph_float, scope='target_q_func', reuse=False)
 
     # Compute the Bellman error
-    all_q_j = []
-    all_y_j = []
+    total_error = 0  # scalar-valued tensor representing Bellman error (error based on current and next Q-values)
     for output_name in output_names:
         _num = arch['outputs'][output_name]['shape'][0]
         q_out = q_func.outputs[output_name]
         target_out = target_q_func.outputs[output_name]
-        all_q_j.append(tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1))
-        all_y_j.append(rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1)))
-
-    total_error = 0
-    for q_j, y_j in zip(all_q_j, all_y_j):
-        # scalar valued tensor representing Bellman error (error based on current and next Q-values)
+        q_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1)
+        y_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1))
         total_error += tf.reduce_mean(tf.square(y_j - q_j))
     q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')
     target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
