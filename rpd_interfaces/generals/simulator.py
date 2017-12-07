@@ -7,49 +7,14 @@ try:
 except ImportError:
     import multiprocessing as queue
 
+from rpd_interfaces.generals.reward import SIM_REWARD_FUNCTIONS
+
 MAP_SIZE = 18
 
 _CITY_MAX_ARMY = 40
 _NEUTRAL = 0
 _TURN_LIMIT = 100
 
-def land_dt(player, state, action, next_state, opponent_land_count):
-    if state is None:
-        return np.count_nonzero(next_state['friendly'])
-    return np.count_nonzero(next_state['friendly']) - np.count_nonzero(state['friendly'])
-
-def x_squares_acquired(player, state, action, next_state, opponent_land_count):
-    """Goal: acquire X squares as quickly as possible."""
-    if state is None:
-        return 1 if np.count_nonzero(next_state['friendly']) >= 20 else 0
-    return 1 if np.count_nonzero(next_state['friendly']) >= 20 else 0
-
-def move_made(player, state, action, next_state, opponent_land_count):
-    """Assumes that the opponent is NOT making moves."""
-    if state is None:
-        return 0.0
-    return int(state['last_location'] != next_state['last_location'])
-
-def win_loss(player, state, action, next_state, opponent_land_count):
-    if not opponent_land_count:
-        return 1
-    else:
-        return 0
-
-def best_point(player, state, action, next_state, opponent_land_count):
-    if action:
-        return player.last_move / np.max(state['friendly'])
-    return 0
-
-def vision_gain(player, state, action, next_state, opponent_land_count):
-    if state is None:
-        return np.sum(1 - next_state['fog']) / 3
-    return (np.sum(state['fog']) - np.sum(next_state['fog'])) / 3
-
-def army_size(player, state, action, next_state, opponent_land_count):
-    if state is None:
-        return np.sum(next_state['friendly'])
-    return np.sum(next_state['friendly']) - np.count_nonzero(state['friendly'])
 
 class Player(object):
     def __init__(self, id_no, general_loc, reward_fn_name='land_dt'):
@@ -61,7 +26,7 @@ class Player(object):
         self.last_action = None
         self.last_move = 0
         self.last_location = general_loc
-        self.reward_fn = eval(reward_fn_name)
+        self.reward_fn = SIM_REWARD_FUNCTIONS[reward_fn_name]
         self.general_loc = general_loc
         self.invalid_penalty = 0
 
@@ -83,6 +48,7 @@ class Player(object):
 
     def update_location(self, location):
         self.last_location = location
+
 
 class Map(object):
     def __init__(self):
@@ -133,7 +99,7 @@ class Map(object):
                 start_location, end_location = player.get_action()
                 self._execute_action(player, start_location, end_location)
         self._spawn()
-        if not fast_mode: # ?
+        if not fast_mode:  # ?
             for player in self.players.values():
                 self._generate_obs(player)
         self.turn_count += 1
@@ -180,7 +146,7 @@ class Map(object):
         player_owned = np.transpose(friendly.nonzero())
         distances = np.min(cdist(self.grid, player_owned, 'euclidean'), axis=1).reshape(self.height, self.width).T
         seen = (distances <= 1.5).astype(np.uint8)
-        
+
         visible_mountains = seen * self.mountains
         visible_generals = seen * self.generals
         fog = 1 - seen

@@ -31,13 +31,15 @@ train_params:
     - num_iterations / 2: 0.10
     - num_iterations: 0.01
   normalize_inputs: True
-  log_freq: 50  # log every X episodes
+  log_freq: 200  # log every X episodes
   log_recent_rewards: True
-  save_model: False
-  save_images: False
-  restore_from:  # TODO (currently not used)
-    run_dir: run_11-30__20_35
-    checkpoint: 50000
+  save_model: True
+  save_images: True
+  evaluate_network: True
+  restore_from:
+    run_dir: run_12-06__22_20
+    iteration: 4949
+  restore: False
 
 # ENV-SPECIFIC INFO
 # ------------------
@@ -86,27 +88,6 @@ dqn_arch:
       activation: relu
 
   outputs:
-#    action:
-#      dtype: int32
-#      shape: [1296]  # 18 * 18 * 4
-#      activation: X
-
-#    target_x:
-#      dtype: int32
-#      shape: [18]
-#      activation: X
-#      order: 0
-#    target_y:
-#      dtype: int32
-#      shape: [18]
-#      activation: X
-#      order: 1
-#    direction:
-#      dtype: int32
-#      shape: [4]  # five actions centered around active square
-#      activation: X
-#      order: 2
-
     target_xy:
       dtype: int32
       shape: [324]
@@ -114,6 +95,6 @@ dqn_arch:
       order: 0
     direction:
       dtype: int32
-      shape: [4]  # five actions centered around active square
+      shape: [4]  # four actions centered around active square
       activation: X
       order: 1

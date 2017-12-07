@@ -10,6 +10,7 @@ This version is local and doesn't require any networking.
 from random import randint
 import json
 import os
+import copy
 import collections
 from PIL import Image, ImageDraw, ImageFont
 
@@ -55,7 +56,7 @@ class GeneralsEnv(Environment):
         self.map.update()
         out = self.map.players[player_id].get_output()
         for prep in preprocessors:
-            out = (eval(prep)(out[0]),) + out[1:]
+            out = (eval(prep)(copy.deepcopy(out[0])),) + out[1:]
         return out
 
     def _encode_action(self, target_x, target_y, direction):
@@ -140,9 +141,9 @@ class GeneralsEnv(Environment):
             out2 = self.map.players[2].get_output()
         for prep in preprocessors:
             _prep = eval(prep)
-            out1 = (_prep(out1[0]),) + out1[1:]
+            out1 = (_prep(copy.deepcopy(out1[0])),) + out1[1:]
             if out2 is not None:
-                out2 = (_prep(out2[0]),) + out2[1:]
+                out2 = (_prep(copy.deepcopy(out2[0])),) + out2[1:]
         return out1 if player_id == 1 else out2
 
     def get_random_action(self, **kwargs):
