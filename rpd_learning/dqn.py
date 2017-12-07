@@ -282,14 +282,14 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             # Log progress
             if len(episode_returns) > 0:
                 mean_episode_return = np.mean(episode_returns)
-            if len(episode_returns) > 100:
+            if len(episode_returns) >= 100:
                 best_mean_episode_return = max(best_mean_episode_return, mean_episode_return)
             if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
                 mean_return_output = 'mean return (100 episodes) %f' % mean_episode_return
                 print_and_log(('step %d ' % t).ljust(len(mean_return_output), '-'))
                 print_and_log(mean_return_output)
                 print_and_log('best mean return (100 episodes) %f' % best_mean_episode_return)
-                print_and_log('episodes %d' % len(episode_returns))
+                print_and_log('episodes %d' % play_count)
                 print_and_log('exploration %f' % exploration.value(t))
                 print_and_log('learning_rate %f' % optimizer_spec.lr_schedule.value(t))
 
