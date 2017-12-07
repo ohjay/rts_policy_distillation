@@ -72,6 +72,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         os.makedirs(checkpoint_dir)
     with open(os.path.join(checkpoint_dir, 'config_in.yaml'), 'w') as outfile:
         yaml.dump(config, outfile, default_flow_style=False)  # save the config as backup
+    print('Logging training information to `%s`.' % checkpoint_dir)
 
     ###############
     # BUILD MODEL #
@@ -307,8 +308,11 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                         if save_images and len(last_obs):
                             image = env.get_image_of_state(last_obs)
                             if image is not None:
-                                image.save(os.path.join(checkpoint_dir,
-                                                        'Game_{}_Step_{}.png'.format(play_count, game_steps)))
+                                img_dir = os.path.join(checkpoint_dir, 'img')
+                                if not os.path.exists(img_dir):
+                                    os.makedirs(img_dir)
+                                    print('\nSaving images to %s.' % img_dir)
+                                image.save(os.path.join(img_dir, 'Game_{}_Step_{}.png'.format(play_count, game_steps)))
 
                         feed_dict = {}
                         for _name in input_names:
