@@ -34,9 +34,6 @@ train_params:
   log_recent_rewards: True
   save_model: False
   save_images: False
-  restore_from:  # TODO (currently not used)
-    run_dir: run_11-30__20_35
-    checkpoint: 50000
 
 # ENV-SPECIFIC INFO
 # ------------------

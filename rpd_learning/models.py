@@ -7,12 +7,11 @@ Utilities for constructing a model.
 """
 
 import os
+import ray
 import copy
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected, convolution2d, flatten, batch_norm
-
-import ray
 
 
 class Model(object):
@@ -163,7 +162,7 @@ class Model(object):
         """Restore the model's variables from a checkpoint file in OUTFOLDER."""
         saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.scope))
         saver.restore(sess, os.path.join(outfolder, 'var-%d' % iteration))
-        print('[+] Model restored to iteration %d (outfolder=%s).' % (iteration, outfolder))
+        print('[+] Model `%s` restored to iteration %d (outfolder=%s).' % (self.scope, iteration, outfolder))
 
 
 class A3CPolicy(object):

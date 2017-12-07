@@ -11,7 +11,7 @@ import os, sys
 import datetime
 import itertools
 import tensorflow as tf
-from collections import namedtuple
+from collections import namedtuple, deque
 
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
@@ -158,16 +158,26 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     last_obs_np = _codec.obs_to_np(last_obs)
     normalize_inputs = train_params.get('normalize_inputs', True)
     log_freq = train_params.get('log_freq', 150)
+    save_images = train_params.get('save_images', True)
     play_count = 0
     game_steps = 0
 
     last_episode_rewards = []
     episode_rewards = []
-    episode_returns = []
+    episode_returns = deque(maxlen=100)
     mean_episode_return = -float('nan')
     best_mean_episode_return = float('-inf')
 
-    save_images = False
+    nw_episode_returns = deque(maxlen=100)  # episode returns for pure network evaluation
+    nw_best_mean_episode_return, nw_best_iteration = float('-inf'), 0
+
+    if train_params.get('restore', False):
+        _restore_meta = train_params.get('restore_from', {})
+        _r_run_dir, _r_iteration = _restore_meta.get('run_dir', None), _restore_meta.get('iteration', None)
+        if None not in (_r_run_dir, _r_iteration):
+            _r_run_dir = os.path.join('.checkpoints', _r_run_dir)
+            q_func.restore(session, _r_iteration, os.path.join(_r_run_dir, 'q_func'))
+            target_q_func.restore(session, _r_iteration, os.path.join(_r_run_dir, 'target_q_func'))
 
     with open(os.path.join(checkpoint_dir, 'log.txt'), 'a+') as logfile:
         def print_and_log(text):
@@ -202,14 +212,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
             last_obs, reward, done = env.step(action, **step_kwargs)
             replay_buffer.store_effect(idx, action, reward, done)
-            if save_images and len(last_obs):
-                image = env.get_image_of_state(last_obs)
-                if image is not None:
-                    run_dir = os.path.join('img', 'run_%s' % _LAUNCH_TIME.strftime('%m-%d__%H_%M'))
-                    if not os.path.exists(run_dir):
-                        os.makedirs(run_dir)
-                        print('Saving images to %s.\n' % run_dir)
-                    image.save("{}/Game_{}_Step_{}.png".format(run_dir, play_count, game_steps))
 
             if done:
                 last_obs, reward, done = env.reset(**reset_kwargs)
@@ -218,7 +220,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 last_episode_rewards = episode_rewards
                 episode_returns.append(sum(episode_rewards))
                 episode_rewards = []
-                save_images = False
                 play_count += 1
                 game_steps = 0
             else:
@@ -276,7 +277,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
             # Log progress
             if len(episode_returns) > 0:
-                mean_episode_return = np.mean(episode_returns[-100:])
+                mean_episode_return = np.mean(episode_returns)
             if len(episode_returns) > 100:
                 best_mean_episode_return = max(best_mean_episode_return, mean_episode_return)
             if play_count % log_freq == 0 and game_steps == 0 and model_initialized:
@@ -292,11 +293,51 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     print_and_log('mean of recent rewards %.2f' % np.mean(last_episode_rewards))
                     print_and_log('recent rewards %r' % last_episode_rewards)
 
-                # Save network parameters and images from next episode
+                # Save network parameters
                 if train_params.get('save_model', True):
                     q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
-                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target'))
-                save_images = train_params.get('save_images', True)
+                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target_q_func'))
+
+                # Evaluate network
+                if train_params.get('evaluate_network', False):
+                    # Since `game_steps` is 0, we know that the environment has been reset
+                    # We also know that `last_obs` and `last_obs_np` point to the most recent observation
+                    nw_episode_rewards = []
+                    while not done:
+                        if save_images and len(last_obs):
+                            image = env.get_image_of_state(last_obs)
+                            if image is not None:
+                                image.save(os.path.join(checkpoint_dir,
+                                                        'Game_{}_Step_{}.png'.format(play_count, game_steps)))
+
+                        feed_dict = {}
+                        for _name in input_names:
+                            if normalize_inputs:
+                                last_obs[_name] = (last_obs[_name] - obs_mean[_name]) / obs_std[_name]
+                            shaped_val = np.reshape(last_obs[_name], (1,) + last_obs[_name].shape)
+                            feed_dict[obs_t_ph[_name]] = shaped_val
+
+                        fetches = [q_func.outputs[output_name] for output_name in output_names]
+                        q_values = session.run(fetches, feed_dict=feed_dict)
+                        action = env.get_action_from_q_values(q_values, **get_action_kwargs)
+                        last_obs, reward, done = env.step(action, **step_kwargs)
+                        nw_episode_rewards.append(reward)
+
+                    last_obs, reward, done = env.reset(**reset_kwargs)
+                    last_obs_np = _codec.obs_to_np(last_obs)
+
+                    nw_return = sum(nw_episode_rewards)
+                    nw_episode_returns.append(nw_return)
+                    nw_mean_episode_return = np.mean(nw_episode_returns)
+                    if nw_mean_episode_return > nw_best_mean_episode_return:
+                        nw_best_mean_episode_return = nw_mean_episode_return
+                        nw_best_iteration = t
+
+                    print_and_log('\n--- network only ---')
+                    print_and_log('return %f' % nw_return)
+                    print_and_log('mean return (100 episodes) %f' % nw_mean_episode_return)
+                    print_and_log('best mean return (100 episodes) %f, at step %d'
+                                  % (nw_best_mean_episode_return, nw_best_iteration))
 
                 print_and_log('')  # newline
                 sys.stdout.flush()

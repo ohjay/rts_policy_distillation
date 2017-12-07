@@ -12,7 +12,7 @@ algorithm: DQN  # choices: (DQN, A3C)
 train_params:
   random_seed: 1
   num_timesteps: 40000000
-  lr_multiplier: 1.0
+  lr_multiplier: 0.1
   replay_buffer_size: 1000000
   batch_size: 128
   gamma: 0.00
@@ -33,11 +33,13 @@ train_params:
   normalize_inputs: True
   log_freq: 50  # log every X episodes
   log_recent_rewards: True
-  save_model: False
-  save_images: False
-  restore_from:  # TODO (currently not used)
-    run_dir: run_11-30__20_35
-    checkpoint: 50000
+  save_model: True
+  save_images: True
+  evaluate_network: True
+  restore_from:
+    run_dir: run_12-06__22_20
+    iteration: 4949
+  restore: False
 
 # ENV-SPECIFIC INFO
 # ------------------
