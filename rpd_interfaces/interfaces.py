@@ -16,7 +16,7 @@ class Environment(object):
         """Set random seed for the environment. If not supported, does nothing."""
         pass
 
-    def reset(self, reward_fn_name=None, **kwargs):
+    def reset(self, reward_fn_names=(), reward_weights=(), **kwargs):
         raise NotImplementedError('blocking method for resetting / starting a new game; '
                                   'returns (obs, reward, done) tuple')
 

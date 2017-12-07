@@ -111,15 +111,21 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     q_func = Model(arch, inputs=obs_t_ph_float, scope='q_func', reuse=False)
     target_q_func = Model(arch, inputs=obs_tp1_ph_float, scope='target_q_func', reuse=False)
 
-    # Compute the Bellman error
-    total_error = 0  # scalar-valued tensor representing Bellman error (error based on current and next Q-values)
-    for output_name in output_names:
-        _num = arch['outputs'][output_name]['shape'][0]
-        q_out = q_func.outputs[output_name]
-        target_out = target_q_func.outputs[output_name]
-        q_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1)
-        y_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1))
-        total_error += tf.reduce_mean(tf.square(y_j - q_j))
+    def _compute_total_error():
+        """Compute the Bellman error as a scalar-valued tensor.
+        (Warning: this function does create new TensorFlow ops.)
+        """
+        _total_error = 0
+        for output_name in output_names:
+            _num = arch['outputs'][output_name]['shape'][0]
+            q_out = q_func.outputs[output_name]
+            target_out = target_q_func.outputs[output_name]
+            q_j = tf.reduce_sum(tf.multiply(tf.one_hot(act_t_ph[output_name], _num), q_out), axis=1)
+            y_j = rew_t_ph + tf.multiply(gamma, tf.reduce_max(tf.stop_gradient(target_out), axis=1))
+            _total_error += tf.reduce_mean(tf.square(y_j - q_j))
+        return _total_error
+    total_error = _compute_total_error()
+
     q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')
     target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_q_func')
 
@@ -151,11 +157,6 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     step_kwargs = config.get('step_kwargs', {})
     get_action_kwargs = config.get('get_action_kwargs', {})
     get_random_kwargs = config.get('get_random_kwargs', {})
-    reward_curriculum = eval_keys(config.get('reward_curriculum', {}))
-    if reward_curriculum:
-        print('[o] Loaded reward curriculum as %r.' % reward_curriculum)
-    else:
-        print('[o] No reward curriculum found.')
     last_obs, reward, done = env.reset(**reset_kwargs)
     last_obs_np = _codec.obs_to_np(last_obs)
     normalize_inputs = train_params.get('normalize_inputs', True)
@@ -164,6 +165,29 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     evaluate_network = train_params.get('evaluate_network', False)
     play_count = 0
     game_steps = 0
+
+    reward_fn_names, reward_weights = [], []
+    curriculum = config.get('curriculum', {})
+    curriculum_on = curriculum.get('_on', False)
+    accumulate_rewards, curriculum_schedule = False, None
+    if curriculum_on:
+        accumulate_rewards = curriculum.get('accumulate_rewards', False)
+        curriculum_schedule = eval_keys(curriculum.get('schedule', {}))
+        if curriculum_schedule:
+            print('[o] Loaded curriculum as %r.' % curriculum_schedule)
+        else:
+            print('[o] No curriculum found.')
+    else:
+        # Validate `reward_fn_names` and `reward_weights` values
+        reward_fn_names = reset_kwargs.get('reward_fn_names', ())
+        reward_weights = reset_kwargs.get('reward_weights', ())
+        len_diff = len(reward_fn_names) - len(reward_weights)
+        if len_diff > 0:
+            reward_weights = reward_weights + type(reward_weights)(1.0 for _ in range(len_diff))
+        elif len_diff < 0:
+            reward_weights = reward_weights[:-len_diff]
+        reset_kwargs['reward_weights'] = reward_weights
+        print('[o] Reward function: `sum(%r)`. Reward weights: %r. No curriculum.' % (reward_fn_names, reward_weights))
 
     last_episode_rewards = []
     episode_rewards = []
@@ -192,9 +216,24 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             if stopping_criterion is not None and stopping_criterion(env, t):
                 break
 
-            if type(reward_curriculum) == dict and t in reward_curriculum:
-                reset_kwargs['reward_fn_name'] = reward_curriculum[t]
-                print('Updated reward function to `%s`, as per the curriculum.' % reset_kwargs['reward_fn_name'])
+            if type(curriculum_schedule) == dict and t in curriculum_schedule:
+                if accumulate_rewards:
+                    reward_fn_names.append(curriculum_schedule[t]['reward_fn_name'])
+                    reward_weights.append(curriculum_schedule[t].get('reward_weight', 1.0))
+                else:
+                    reward_fn_names = [curriculum_schedule[t]['reward_fn_name']]
+                    reward_weights = [curriculum_schedule[t].get('reward_weight', 1.0)]
+                reset_kwargs['reward_fn_names'] = reward_fn_names
+                reset_kwargs['reward_weights'] = reward_weights
+                print('Updated reward function to `sum(%s)`, as per the curriculum.' % reset_kwargs['reward_fn_names'])
+
+                if 'gamma' in curriculum_schedule[t] and curriculum_schedule[t]['gamma'] != gamma:
+                    # Reconstruct `total_error` and `train_fn` to reflect updated discount factor
+                    gamma = curriculum_schedule[t]['gamma']
+                    total_error = _compute_total_error()
+                    train_fn = minimize_and_clip(optimizer, total_error,
+                                                 var_list=q_func_vars, clip_val=grad_norm_clipping)
+                    print('Updated gamma (discount factor) to %f.' % gamma)
 
             # Step the env and store the transition in the replay buffer
             idx = replay_buffer.store_frame(last_obs_np, dtype=_codec.obs_encoding_dtype)

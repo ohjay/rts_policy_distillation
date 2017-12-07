@@ -63,3 +63,30 @@ def eval_keys(d, _globals=None, _locals=None):
             del d[key]
             d[eval(key, _globals, _locals)] = value
     return d
+
+
+def sum_functions(*fns):
+    """Return a new function F(x1, ...) that, when called, returns the result of summing
+    F1(x1, ...), F2(x1, ...), ..., FN(x1, ...) - where F1, ..., FN are the N functions given
+    by FNS.
+
+    In other words, F(x1, ...) = F1(x1, ...) + F2(x1, ...) + ... + FN(x1, ...)
+
+    Each function is assumed to have the same signature.
+    """
+    if len(fns) == 1 and type(fns[0]) in (tuple, list):
+        fns = fns[0]  # can call `sum_functions` as `sum_functions(f1, f2, ...)` or `sum_functions([f1, f2, ...])`
+    return lambda *args: sum([fn(*args) for fn in fns])
+
+
+def sum_functions_with_weights(fns, weights):
+    """Like `sum_functions` where the return value of each function from FNS
+    is weighted by the same-indexed term from WEIGHTS.
+
+    In other words, if FNS = [f1, f2, ..., fn] and WEIGHTS = [w1, w2, ..., wn],
+    then the returned function F(...) = w1 * f1(...) + w2 * f2(...) + ... + wn * fn(...).
+
+    It is assumed that `len(fns)` == `len(weights)`.
+    """
+    assert len(fns) == len(weights), 'must have exactly one weight for every function'
+    return lambda *args: sum([w * fn(*args) for fn, w in zip(fns, weights)])

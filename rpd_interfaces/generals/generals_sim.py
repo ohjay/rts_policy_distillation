@@ -44,13 +44,15 @@ class GeneralsEnv(Environment):
             self.action_space = DEFAULT_ACTION_SPACE
         print('Loaded action space as %r.' % self.action_space)
 
-    def reset(self, reward_fn_name=None, map_init='random', player_id=1, preprocessors=(), s_index=None):
+    def reset(self, reward_fn_names=(), reward_weights=(),
+              map_init='random', player_id=1, preprocessors=(), s_index=None):
         """Sets the map using a random replay."""
         if map_init.lower() == 'empty':
-            self.map = self._get_random_map(include_mountains=False, include_cities=False,
-                                            s_index=s_index, reward_fn_name=reward_fn_name)
+            self.map = self._get_random_map(include_mountains=False, include_cities=False, s_index=s_index,
+                                            reward_fn_names=reward_fn_names, reward_weights=reward_weights)
         elif map_init.lower() == 'random':
-            self.map = self._get_random_map(s_index=s_index, reward_fn_name=reward_fn_name)
+            self.map = self._get_random_map(s_index=s_index,
+                                            reward_fn_names=reward_fn_names, reward_weights=reward_weights)
         else:
             raise NotImplementedError('map init "%s" not supported' % map_init)
         self.map.update()
@@ -101,7 +103,8 @@ class GeneralsEnv(Environment):
     def _flat_to_2d(self, index):
         return index // MAP_SIZE, index % MAP_SIZE
 
-    def _get_random_map(self, include_mountains=True, include_cities=True, s_index=None, reward_fn_name=None):
+    def _get_random_map(self, include_mountains=True, include_cities=True,
+                        s_index=None, reward_fn_names=(), reward_weights=()):
         while True:
             if s_index is None:
                 index = randint(0, len(self.replays) - 1)
@@ -119,7 +122,7 @@ class GeneralsEnv(Environment):
             for i in range(len(replay['cities'])):
                 m.add_city(self._flat_to_2d(replay['cities'][i]), replay['cityArmies'][i])
         for general in replay['generals']:
-            m.add_general(self._flat_to_2d(general), reward_fn_name=reward_fn_name)
+            m.add_general(self._flat_to_2d(general), reward_fn_names=reward_fn_names, reward_weights=reward_weights)
         return m
 
     def step(self, action1, action2=None, player_id=1, preprocessors=()):

@@ -8,8 +8,10 @@ except ImportError:
     import multiprocessing as queue
 
 from rpd_interfaces.generals.reward import SIM_REWARD_FUNCTIONS
+from rpd_learning.general_utils import sum_functions_with_weights
 
 MAP_SIZE = 18
+VERBOSE = True
 
 _CITY_MAX_ARMY = 40
 _NEUTRAL = 0
@@ -17,7 +19,7 @@ _TURN_LIMIT = 100
 
 
 class Player(object):
-    def __init__(self, id_no, general_loc, reward_fn_name='land_dt'):
+    def __init__(self, id_no, general_loc, reward_fn_names=('land_dt',), reward_weights=(1.0,)):
         self.id_no = id_no
         self.actions = queue.Queue()
         self.outputs = queue.Queue()
@@ -26,7 +28,8 @@ class Player(object):
         self.last_action = None
         self.last_move = 0
         self.last_location = general_loc
-        self.reward_fn = SIM_REWARD_FUNCTIONS[reward_fn_name]
+        reward_fns = [SIM_REWARD_FUNCTIONS[rfn] for rfn in reward_fn_names]
+        self.reward_fn = sum_functions_with_weights(reward_fns, reward_weights)
         self.general_loc = general_loc
         self.invalid_penalty = 0
 
@@ -80,15 +83,23 @@ class Map(object):
         self.armies[pos[0], pos[1]] = army
         self.cities_list.append(pos)
 
-    def add_general(self, pos, player_id=-1, reward_fn_name=None):
+    def add_general(self, pos, player_id=-1, reward_fn_names=(), reward_weights=()):
         self.num_players += 1
         if player_id == -1:
             player_id = self.num_players
         self.generals[pos[0], pos[1]] = 1
         self.owner[pos[0], pos[1]] = player_id
         self.armies[pos[0], pos[1]] = 1
-        if reward_fn_name is not None:
-            self.players[player_id] = Player(player_id, pos, reward_fn_name)
+        if len(reward_fn_names) > 0:
+            len_diff = len(reward_fn_names) - len(reward_weights)
+            if len_diff > 0:
+                if VERBOSE:
+                    print('Warning: %d reward function(s), but only %d weight(s). Missing values will be set to 1.0.'
+                          % (len(reward_fn_names), len(reward_weights)))
+                reward_weights = reward_weights + type(reward_weights)(1.0 for _ in range(len_diff))
+            elif len_diff < 0:
+                reward_weights = reward_weights[:-len_diff]
+            self.players[player_id] = Player(player_id, pos, reward_fn_names, reward_weights)
         else:
             self.players[player_id] = Player(player_id, pos)
         self.generals_list.append(pos)
@@ -145,7 +156,8 @@ class Map(object):
         enemy = np.logical_xor(np.logical_not(friendly), neutral)
         player_owned = np.transpose(friendly.nonzero())
         distances = np.min(cdist(self.grid, player_owned, 'euclidean'), axis=1).reshape(self.height, self.width).T
-        seen = (distances <= 1.5).astype(np.uint8)
+        seen = distances <= 1.5  # type: np.ndarray
+        seen = seen.astype(np.uint8)
 
         visible_mountains = seen * self.mountains
         visible_generals = seen * self.generals
