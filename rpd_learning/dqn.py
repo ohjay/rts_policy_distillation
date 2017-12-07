@@ -6,6 +6,7 @@ dqn.py
 Deep Q-network as described by CS 294-112 (goo.gl/MhA4eA).
 """
 
+import copy
 import yaml
 import os, sys
 import datetime
@@ -160,6 +161,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     normalize_inputs = train_params.get('normalize_inputs', True)
     log_freq = train_params.get('log_freq', 150)
     save_images = train_params.get('save_images', True)
+    evaluate_network = train_params.get('evaluate_network', False)
     play_count = 0
     game_steps = 0
 
@@ -203,6 +205,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 feed_dict = {}
                 for input_name in obs_recent.keys():
                     if normalize_inputs:
+                        obs_recent = copy.deepcopy(obs_recent)
                         obs_recent[input_name] = (obs_recent[input_name] - obs_mean[input_name]) / obs_std[input_name]
                     shaped_val = np.reshape(obs_recent[input_name], (1,) + obs_recent[input_name].shape)
                     feed_dict[obs_t_ph[input_name]] = shaped_val
@@ -295,12 +298,12 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     print_and_log('recent rewards %r' % last_episode_rewards)
 
                 # Save network parameters
-                if train_params.get('save_model', True):
+                if not evaluate_network and train_params.get('save_model', True):
                     q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
                     target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target_q_func'))
 
                 # Evaluate network
-                if train_params.get('evaluate_network', False):
+                if evaluate_network:
                     # Since `game_steps` is 0, we know that the environment has been reset
                     # We also know that `last_obs` and `last_obs_np` point to the most recent observation
                     nw_episode_rewards = []
@@ -317,6 +320,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                         feed_dict = {}
                         for _name in input_names:
                             if normalize_inputs:
+                                last_obs = copy.deepcopy(last_obs)
                                 last_obs[_name] = (last_obs[_name] - obs_mean[_name]) / obs_std[_name]
                             shaped_val = np.reshape(last_obs[_name], (1,) + last_obs[_name].shape)
                             feed_dict[obs_t_ph[_name]] = shaped_val
@@ -326,9 +330,11 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                         action = env.get_action_from_q_values(q_values, **get_action_kwargs)
                         last_obs, reward, done = env.step(action, **step_kwargs)
                         nw_episode_rewards.append(reward)
+                        game_steps += 1
 
                     last_obs, reward, done = env.reset(**reset_kwargs)
                     last_obs_np = _codec.obs_to_np(last_obs)
+                    game_steps = 0
 
                     nw_return = sum(nw_episode_rewards)
                     nw_episode_returns.append(nw_return)
@@ -336,6 +342,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     if nw_mean_episode_return > nw_best_mean_episode_return:
                         nw_best_mean_episode_return = nw_mean_episode_return
                         nw_best_iteration = t
+                        if train_params.get('save_model', True):
+                            q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
+                            target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target_q_func'))
 
                     print_and_log('\n--- network only ---')
                     print_and_log('return %f' % nw_return)
