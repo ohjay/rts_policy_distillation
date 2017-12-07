@@ -48,3 +48,18 @@ def dominant_dtype(dtypes):
         if priority > max_priority:
             dominant, max_priority = dtype, priority
     return dominant
+
+
+def eval_keys(d, _globals=None, _locals=None):
+    """Replaces any string keys of a dictionary with their evaluated forms."""
+    if _globals is None:
+        _globals = globals()
+    if _locals is None:
+        _locals = _globals
+    keys = d.keys()
+    for key in keys:
+        if type(key) == str:
+            value = d[key]
+            del d[key]
+            d[eval(key, _globals, _locals)] = value
+    return d

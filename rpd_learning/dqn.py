@@ -16,7 +16,7 @@ from collections import namedtuple, deque
 
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
-from rpd_learning.general_utils import rm_rf
+from rpd_learning.general_utils import rm_rf, eval_keys
 from rpd_learning.obs_codecs import StandardCodec
 import random
 
@@ -156,6 +156,11 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     step_kwargs = config.get('step_kwargs', {})
     get_action_kwargs = config.get('get_action_kwargs', {})
     get_random_kwargs = config.get('get_random_kwargs', {})
+    reward_curriculum = eval_keys(config.get('reward_curriculum', {}))
+    if reward_curriculum:
+        print('[o] Loaded reward curriculum as %r.' % reward_curriculum)
+    else:
+        print('[o] No reward curriculum found.')
     last_obs, reward, done = env.reset(**reset_kwargs)
     last_obs_np = _codec.obs_to_np(last_obs)
     normalize_inputs = train_params.get('normalize_inputs', True)
@@ -191,6 +196,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
         for t in itertools.count():
             if stopping_criterion is not None and stopping_criterion(env, t):
                 break
+
+            if type(reward_curriculum) == dict and t in reward_curriculum:
+                reset_kwargs['reward_fn_name'] = reward_curriculum[t]
+                print('Updated reward function to `%s`, as per the curriculum.' % reset_kwargs['reward_fn_name'])
 
             # Step the env and store the transition in the replay buffer
             idx = replay_buffer.store_frame(last_obs_np, dtype=_codec.obs_encoding_dtype)

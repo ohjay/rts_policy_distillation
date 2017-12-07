@@ -49,11 +49,11 @@ generals_sim:
   map_player_count: 2
 
 reset_kwargs:
+  reward_fn_name: move_made  # (default) choice of reward function in `reward.py`
   map_init: empty  # choices: (empty, random)
   player_id: 1
   preprocessors:  # choice of preprocessors from `generals_sim.py`
     - add_dimension
-  reward_fn_name: move_made  # choice of reward function in `simulator.py`
 
 step_kwargs:
   player_id: 1
@@ -66,6 +66,12 @@ get_action_kwargs:
 get_random_kwargs:
   semi_valid: True  # choose a random action that is guaranteed to "probably" be valid?
   player_id: 1
+
+reward_curriculum:  # (timestep, reward_fn_name)
+  0: move_made
+  1e7: land_dt
+  2e7: vision_gain
+  3e7: army_size
 
 # MODEL ARCHITECTURE
 # ------------------

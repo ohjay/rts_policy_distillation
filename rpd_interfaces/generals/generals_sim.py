@@ -44,7 +44,7 @@ class GeneralsEnv(Environment):
             self.action_space = DEFAULT_ACTION_SPACE
         print('Loaded action space as %r.' % self.action_space)
 
-    def reset(self, map_init='random', player_id=1, preprocessors=(), s_index=None, reward_fn_name=None):
+    def reset(self, reward_fn_name=None, map_init='random', player_id=1, preprocessors=(), s_index=None):
         """Sets the map using a random replay."""
         if map_init.lower() == 'empty':
             self.map = self._get_random_map(include_mountains=False, include_cities=False,

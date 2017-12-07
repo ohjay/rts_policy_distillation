@@ -51,7 +51,7 @@ class AtariEnv(Environment):
     def seed(self, i):
         self.base_env.seed(i)
 
-    def reset(self, **kwargs):
+    def reset(self, reward_fn_name=None, **kwargs):
         """Resets the environment and returns an (observation, reward, done) tuple."""
         obs = self.env.reset()
         return {self.obs_input_name: obs}, None, None
