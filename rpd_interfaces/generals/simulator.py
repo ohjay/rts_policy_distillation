@@ -15,6 +15,7 @@ _CITY_MAX_ARMY = 40
 _NEUTRAL = 0
 _TURN_LIMIT = 100
 
+
 class Player(object):
     def __init__(self, id_no, general_loc, reward_fn_name='land_dt'):
         self.id_no = id_no
@@ -47,6 +48,7 @@ class Player(object):
 
     def update_location(self, location):
         self.last_location = location
+
 
 class Map(object):
     def __init__(self):
@@ -97,7 +99,7 @@ class Map(object):
                 start_location, end_location = player.get_action()
                 self._execute_action(player, start_location, end_location)
         self._spawn()
-        if not fast_mode: # ?
+        if not fast_mode:  # ?
             for player in self.players.values():
                 self._generate_obs(player)
         self.turn_count += 1
@@ -144,7 +146,7 @@ class Map(object):
         player_owned = np.transpose(friendly.nonzero())
         distances = np.min(cdist(self.grid, player_owned, 'euclidean'), axis=1).reshape(self.height, self.width).T
         seen = (distances <= 1.5).astype(np.uint8)
-        
+
         visible_mountains = seen * self.mountains
         visible_generals = seen * self.generals
         fog = 1 - seen
