@@ -214,9 +214,11 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             _r_run_dir = os.path.join('.checkpoints', _r_run_dir)
             q_func.restore(session, _r_iteration, os.path.join(_r_run_dir, 'q_func'))
             target_q_func.restore(session, _r_iteration, os.path.join(_r_run_dir, 'target_q_func'))
-            with open(os.path.join(checkpoint_dir, 'moments.pkl')) as f:
-                obs_mean, obs_std = pickle.load(f)
-                moments_initialized = True
+            moments_path = os.path.join(checkpoint_dir, 'moments.pkl')
+            if os.path.exists(moments_path):
+                with open(moments_path) as f:
+                    obs_mean, obs_std = pickle.load(f)
+                    moments_initialized = True
 
     with open(os.path.join(checkpoint_dir, 'log.txt'), 'a+') as logfile:
         def print_and_log(text):
