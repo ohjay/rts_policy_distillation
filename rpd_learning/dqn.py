@@ -20,9 +20,9 @@ from rpd_learning.general_utils import rm_rf, eval_keys, next_greater
 from rpd_learning.obs_codecs import StandardCodec
 import random
 
-
 OptimizerSpec = namedtuple('OptimizerSpec', ['constructor', 'kwargs', 'lr_schedule'])
 _LAUNCH_TIME = datetime.datetime.now()
+
 
 def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(1000000, 0.1), stopping_criterion=None,
           replay_buffer_size=1000000, batch_size=32, gamma=0.99, learning_starts=50000, learning_freq=4,
@@ -198,7 +198,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     mean_episode_return = -float('nan')
     best_mean_episode_return = float('-inf')
 
-    nw_episode_returns = deque(maxlen=100)  # episode returns for pure network evaluation
+    nw_returns_capacity = train_params.get('nw_returns_capacity', 100)
+    nw_episode_returns = deque(maxlen=nw_returns_capacity)  # episode returns for pure network evaluation
     nw_best_mean_episode_return, nw_best_iteration = float('-inf'), 0
 
     random_evaluated = False
@@ -399,7 +400,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
                     nw_return = sum(nw_episode_rewards)
                     nw_episode_returns.append(nw_return)
-                    nw_mean_episode_return = np.mean(nw_episode_returns)
+                    nw_mean_episode_return = np.mean(nw_episode_returns)  # type: float
                     if nw_mean_episode_return > nw_best_mean_episode_return:
                         nw_best_mean_episode_return = nw_mean_episode_return
                         nw_best_iteration = t
@@ -409,9 +410,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
                     print_and_log('\n--- network only ---')
                     print_and_log('return %f' % nw_return)
-                    print_and_log('mean return (100 episodes) %f' % nw_mean_episode_return)
-                    print_and_log('best mean return (100 episodes) %f, at step %d'
-                                  % (nw_best_mean_episode_return, nw_best_iteration))
+                    print_and_log('mean return (%d episodes) %f' % (nw_returns_capacity, nw_mean_episode_return))
+                    print_and_log('best mean return (%d episodes) %f, at step %d'
+                                  % (nw_returns_capacity, nw_best_mean_episode_return, nw_best_iteration))
 
                 # Evaluate random
                 if not random_evaluated and train_params.get('evaluate_random', False):
