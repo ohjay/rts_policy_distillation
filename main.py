@@ -41,7 +41,10 @@ def train_dqn(env, config):
 
     session = get_session()
     num_timesteps = train_params.get('num_timesteps', int(4e7))
+    if type(num_timesteps) == str:
+        num_timesteps = eval(num_timesteps)
     num_iterations = float(num_timesteps) / 4.0
+    print('Loaded `num_timesteps` as %r (and `num_iterations` as %r).' % (num_timesteps, num_iterations))
 
     def _process_endpoints(endpoints, _locals=None):
         """Convert ENDPOINTS into the format required for a PiecewiseSchedule.
