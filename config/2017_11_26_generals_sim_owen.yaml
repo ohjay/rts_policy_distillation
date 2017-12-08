@@ -77,23 +77,19 @@ get_random_kwargs:
 curriculum:
   _on: True
   accumulate_rewards: True
-  min_reward_weight: 0.1  # TODO: use this during weight scheduling
+  min_reward_weight: 0.1  # during scheduling, the weight for the latest reward function will go from MRW -> 1
   schedule:  # {step: {curriculum settings}}
     0:
       reward_fn_name: move_made
-      reward_weight: 1.0  # TODO: schedule this across iterations
       gamma: 0.00
     1e7:
       reward_fn_name: land_dt
-      reward_weight: 2.0
       gamma: 0.99
     2e7:
       reward_fn_name: vision_gain
-      reward_weight: 3.0
       gamma: 0.99
     3e7:
       reward_fn_name: army_size
-      reward_weight: 4.0
       gamma: 0.99
 
 

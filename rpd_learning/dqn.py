@@ -16,7 +16,7 @@ from collections import namedtuple, deque
 
 from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
-from rpd_learning.general_utils import rm_rf, eval_keys
+from rpd_learning.general_utils import rm_rf, eval_keys, next_greater
 from rpd_learning.obs_codecs import StandardCodec
 import random
 
@@ -169,12 +169,15 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     reward_fn_names, reward_weights = [], []
     curriculum = config.get('curriculum', {})
     curriculum_on = curriculum.get('_on', False)
-    accumulate_rewards, curriculum_schedule = False, None
+    accumulate_rewards, curriculum_schedule, min_reward_weight = False, None, None
+    latest_reward_weight = None
     if curriculum_on:
         accumulate_rewards = curriculum.get('accumulate_rewards', False)
+        min_reward_weight = curriculum.get('min_reward_weight', 0.1)
         curriculum_schedule = eval_keys(curriculum.get('schedule', {}))
         if curriculum_schedule:
             print('[o] Loaded curriculum as %r.' % curriculum_schedule)
+            print('[o] accumulate_rewards = %r, min_reward_weight = %f' % (accumulate_rewards, min_reward_weight))
         else:
             print('[o] No curriculum found.')
     else:
@@ -219,10 +222,19 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             if type(curriculum_schedule) == dict and t in curriculum_schedule:
                 if accumulate_rewards:
                     reward_fn_names.append(curriculum_schedule[t]['reward_fn_name'])
-                    reward_weights.append(curriculum_schedule[t].get('reward_weight', 1.0))
+                    if len(reward_fn_names) >= 2:
+                        next_t = next_greater(curriculum_schedule.keys(), t)
+                        if next_t is None:
+                            next_t = t + 1e7
+                        latest_reward_weight = LinearSchedule(next_t - 1, 1.0, min_reward_weight, t)
+                        reward_weights.append(latest_reward_weight.value(t))
+                        reward_weights[:-2] = [min_reward_weight for _ in range(len(reward_weights) - 2)]
+                        reward_weights[-2] = 1.0 - reward_weights[-1]
+                    else:
+                        reward_weights.append(1.0)
                 else:
                     reward_fn_names = [curriculum_schedule[t]['reward_fn_name']]
-                    reward_weights = [curriculum_schedule[t].get('reward_weight', 1.0)]
+                    reward_weights = [1.0]
                 reset_kwargs['reward_fn_names'] = reward_fn_names
                 reset_kwargs['reward_weights'] = reward_weights
                 print('Updated reward function to `sum(%s)`, as per the curriculum.' % reset_kwargs['reward_fn_names'])
@@ -234,6 +246,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     train_fn = minimize_and_clip(optimizer, total_error,
                                                  var_list=q_func_vars, clip_val=grad_norm_clipping)
                     print('Updated gamma (discount factor) to %f.' % gamma)
+            elif latest_reward_weight is not None:
+                # Update weights for the latest two reward functions
+                reward_weights[-1] = latest_reward_weight.value(t)
+                reward_weights[-2] = 1.0 - reward_weights[-1]
 
             # Step the env and store the transition in the replay buffer
             idx = replay_buffer.store_frame(last_obs_np, dtype=_codec.obs_encoding_dtype)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import shutil
+import numpy as np
 
 _DTYPE_ORDERING = [
     'bool8',
@@ -90,3 +91,12 @@ def sum_functions_with_weights(fns, weights):
     """
     assert len(fns) == len(weights), 'must have exactly one weight for every function'
     return lambda *args: sum([w * fn(*args) for fn, w in zip(fns, weights)])
+
+
+def next_greater(iterable, x):
+    """Returns from ITERABLE the closest element to X that is also greater than X.
+    If no elements in ITERABLE are greater than X, returns None.
+    """
+    iterable_np = np.array(iterable)
+    all_greater = iterable_np[iterable_np > x]
+    return all_greater.min() if len(all_greater) > 0 else None

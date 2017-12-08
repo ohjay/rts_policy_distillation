@@ -10,11 +10,13 @@ import tensorflow as tf
 import numpy as np
 import random
 
+
 def merge_dicts(*args):
     z = args[0].copy()  # start with the first dictionary's keys and values
     for y in args[1:]:
         z.update(y)  # modifies z with y's keys and values & returns None
     return z
+
 
 def sample_n_unique(sampling_f, n):
     """Helper function. Given a function SAMPLING_F that returns
@@ -27,8 +29,10 @@ def sample_n_unique(sampling_f, n):
             res.append(candidate)
     return res
 
+
 def linear_interpolation(l, r, alpha):
     return l + alpha * (r - l)
+
 
 def minimize_and_clip(optimizer, objective, var_list, clip_val=10):
     """Minimize OBJECTIVE using OPTIMIZER w.r.t. variables in VAR_LIST,
@@ -39,6 +43,7 @@ def minimize_and_clip(optimizer, objective, var_list, clip_val=10):
         if grad is not None:
             gradients[i] = (tf.clip_by_norm(grad, clip_val), var)
     return optimizer.apply_gradients(gradients)
+
 
 def initialize_interdependent_variables(session, vars_list, feed_dict):
     """Initialize a list of variables one at a time, which is useful if
@@ -60,10 +65,12 @@ def initialize_interdependent_variables(session, vars_list, feed_dict):
         else:
             vars_left = new_vars_left
 
+
 class Schedule(object):
     def value(self, t):
         """Value of the schedule at time t."""
         raise NotImplementedError('abstract method')
+
 
 class PiecewiseSchedule(Schedule):
     def __init__(self, endpoints, interpolation=linear_interpolation, outside_value=None):
@@ -101,27 +108,33 @@ class PiecewiseSchedule(Schedule):
         assert self._outside_value is not None
         return self._outside_value
 
+
 class LinearSchedule(Schedule):
-    def __init__(self, schedule_timesteps, final_p, initial_p=1.0):
-        """Linear interpolation between initial_p and final_p over
-        schedule_timesteps. After this many timesteps pass final_p is returned.
+    def __init__(self, final_timestep, final_p, initial_p=1.0, initial_timestep=0):
+        """Linear interpolation between `initial_p` and `final_p` over
+        `schedule_timesteps`. After this many timesteps pass `final_p` is returned.
+
         Parameters
         ----------
-        schedule_timesteps: int
-            Number of timesteps for which to linearly anneal initial_p to final_p
+        final_timestep: int
+            Endpoint of timesteps over which to linearly anneal `initial_p` to `final_p`.
         initial_p: float
-            initial output value
+            Initial output value.
         final_p: float
-            final output value
+            Final output value.
+        initial_timestep: int
+            Reference timestep for the start of the schedule. All timesteps are relative to this timestep.
         """
-        self.schedule_timesteps = schedule_timesteps
-        self.final_p            = final_p
-        self.initial_p          = initial_p
+        self.final_timestep = final_timestep
+        self.final_p = final_p
+        self.initial_p = initial_p
+        self.initial_timestep = initial_timestep
 
     def value(self, t):
         """Value of the schedule at time t."""
-        fraction = min(float(t) / self.schedule_timesteps, 1.0)
+        fraction = min(float(t - self.initial_timestep) / (self.final_timestep - self.initial_timestep), 1.0)
         return self.initial_p + fraction * (self.final_p - self.initial_p)
+
 
 class ReplayBuffer(object):
     def __init__(self, size, frame_history_len):
@@ -173,7 +186,6 @@ class ReplayBuffer(object):
 
         return obs_batch, act_batch, rew_batch, next_obs_batch, done_mask
 
-    # TODO: inspect dimensions and dtypes
     def sample(self, batch_size):
         """Sample `batch_size` different transitions.
 
@@ -223,7 +235,6 @@ class ReplayBuffer(object):
         assert self.num_in_buffer > 0
         return self._encode_observation((self.next_idx - 1) % self.size)
 
-    # TODO: inspect this
     def _encode_observation(self, idx):
         end_idx = idx + 1  # make noninclusive
         start_idx = end_idx - self.frame_history_len
