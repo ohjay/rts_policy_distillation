@@ -36,6 +36,7 @@ train_params:
   save_model: True
   save_images: True
   evaluate_network: True
+  evaluate_random: True
   restore_from:
     run_dir: run_12-06__22_20
     iteration: 4949

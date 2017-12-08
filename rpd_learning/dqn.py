@@ -21,7 +21,7 @@ from rpd_learning.obs_codecs import StandardCodec
 import random
 
 
-OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
+OptimizerSpec = namedtuple('OptimizerSpec', ['constructor', 'kwargs', 'lr_schedule'])
 _LAUNCH_TIME = datetime.datetime.now()
 
 def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(1000000, 0.1), stopping_criterion=None,
@@ -200,6 +200,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
 
     nw_episode_returns = deque(maxlen=100)  # episode returns for pure network evaluation
     nw_best_mean_episode_return, nw_best_iteration = float('-inf'), 0
+
+    random_evaluated = False
 
     if train_params.get('restore', False):
         _restore_meta = train_params.get('restore_from', {})
@@ -410,6 +412,25 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     print_and_log('mean return (100 episodes) %f' % nw_mean_episode_return)
                     print_and_log('best mean return (100 episodes) %f, at step %d'
                                   % (nw_best_mean_episode_return, nw_best_iteration))
+
+                # Evaluate random
+                if not random_evaluated and train_params.get('evaluate_random', False):
+                    r_episode_returns = []
+                    for _ in range(100):
+                        r_episode_rewards = []
+                        while not done:
+                            action = env.get_random_action(**get_random_kwargs)
+                            last_obs, reward, done = env.step(action, **step_kwargs)
+                            r_episode_rewards.append(reward)
+
+                        last_obs, reward, done = env.reset(**reset_kwargs)
+                        r_episode_returns.append(sum(r_episode_rewards))
+                    last_obs_np = _codec.obs_to_np(last_obs)  # necessary cleanup
+
+                    print_and_log('\n--- random only ---')
+                    print_and_log('mean return (100 episodes) %f' % np.mean(r_episode_returns))
+                    random_evaluated = True
+                    del r_episode_returns
 
                 print_and_log('')  # newline
                 sys.stdout.flush()

@@ -15,10 +15,12 @@ SUPPORTED_ENVS = {'generals', 'generals_sim', 'atari_pong', 'atari_pong_ram'}
 SUPPORTED_OPS = {'train'}
 SUPPORTED_ALGS = {'DQN', 'A3C'}
 
+
 def get_available_gpus():
     from tensorflow.python.client import device_lib
     local_device_protos = device_lib.list_local_devices()
     return [x.physical_device_desc for x in local_device_protos if x.device_type == 'GPU']
+
 
 def get_session():
     tf.reset_default_graph()
@@ -28,6 +30,7 @@ def get_session():
     session = tf.Session(config=tf_config)
     print("AVAILABLE GPUs: ", get_available_gpus())
     return session
+
 
 def train_dqn(env, config):
     # Run DQN training for the given environment
@@ -97,13 +100,16 @@ def train_dqn(env, config):
     if hasattr(env, 'close'):  # cleanup, if applicable
         env.close()
 
+
 def train_a3c(env, config):
     num_workers = 2
     max_batches = 4000000
     a3c.learn(num_workers, max_batches, env, config, batch_size=32)
 
+
 def test(env, config):
     pass  # TODO add evaluation code
+
 
 def run(config):
     """Run RPD code according to the passed-in config file."""
