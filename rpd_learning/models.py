@@ -8,10 +8,15 @@ Utilities for constructing a model.
 
 import os
 import ray
+import glob
 import copy
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.layers import fully_connected, convolution2d, flatten, batch_norm
+
+from rpd_learning.general_utils import confirm
+
+REQUIRE_CONFIRMATION = False
 
 
 class Model(object):
@@ -21,6 +26,9 @@ class Model(object):
         self.inputs = inputs if type(inputs) == dict else {}
         self.outputs, self.labels = {}, {}
         self.losses, self.optimize = {}, {}
+
+        self.prev_saved_outfolder = None
+        self.prev_saved_iteration = None
 
         # Construct the actual graph
         if scope is None:
@@ -149,14 +157,30 @@ class Model(object):
             return tf.reduce_mean(tf.squared_difference(outputs, labels))
         raise NotImplementedError
 
-    def save(self, sess, iteration, outfolder='out', write_meta_graph=True):
+    def save(self, sess, iteration, outfolder='out', write_meta_graph=True, delete_prev=False):
         """Save the model's variables (as they exist in the current session) to a checkpoint file in OUTFOLDER."""
         if not os.path.exists(outfolder):
             os.makedirs(outfolder)
         base_filepath = os.path.join(outfolder, 'var')
+
+        if delete_prev and self.prev_saved_outfolder == outfolder and self.prev_saved_iteration is not None:
+            # Delete everything in `self.prev_saved_outfolder` that starts with `var-[PREV_ITERATION]`
+            pathname = base_filepath + '-' + str(self.prev_saved_iteration) + '*'
+            confirmation = True
+            if REQUIRE_CONFIRMATION:
+                print('WARNING: about to try to delete files according to the following path: %s' % pathname)
+                confirmation = confirm('Proceed? (True/False)')
+            if confirmation:
+                for filepath in glob.glob(pathname):
+                    os.remove(filepath)
+            else:
+                print('Operation aborted.')
+
         saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope=self.scope))
         saver.save(sess, base_filepath, global_step=iteration, write_meta_graph=write_meta_graph)
         print('[+] Saved current parameters to %s-%d.index.' % (base_filepath, iteration))
+        self.prev_saved_outfolder = outfolder
+        self.prev_saved_iteration = iteration
 
     def restore(self, sess, iteration, outfolder='out'):
         """Restore the model's variables from a checkpoint file in OUTFOLDER."""

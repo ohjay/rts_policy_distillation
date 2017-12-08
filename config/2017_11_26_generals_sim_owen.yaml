@@ -34,6 +34,7 @@ train_params:
   log_freq: 200  # log every X episodes
   log_recent_rewards: True
   save_model: True
+  delete_old_models: True
   save_images: True
   evaluate_network: True
   nw_returns_capacity: 5  # during network evaluation, remember returns for X episodes

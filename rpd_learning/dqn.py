@@ -161,6 +161,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     last_obs_np = _codec.obs_to_np(last_obs)
     normalize_inputs = train_params.get('normalize_inputs', True)
     log_freq = train_params.get('log_freq', 150)
+    save_model = train_params.get('save_model', True)
+    delete_old_models = train_params.get('delete_old_models', False)
     save_images = train_params.get('save_images', True)
     evaluate_network = train_params.get('evaluate_network', False)
     play_count = 0
@@ -360,9 +362,11 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     print_and_log('recent rewards %r' % last_episode_rewards)
 
                 # Save network parameters
-                if not evaluate_network and train_params.get('save_model', True):
-                    q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
-                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target_q_func'))
+                if not evaluate_network and save_model:
+                    q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'),
+                                delete_prev=delete_old_models)
+                    target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target_q_func'),
+                                       delete_prev=delete_old_models)
 
                 # Evaluate network
                 if evaluate_network:
@@ -404,9 +408,11 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     if nw_mean_episode_return > nw_best_mean_episode_return:
                         nw_best_mean_episode_return = nw_mean_episode_return
                         nw_best_iteration = t
-                        if train_params.get('save_model', True):
-                            q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'))
-                            target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target_q_func'))
+                        if save_model:
+                            q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'q_func'),
+                                        delete_prev=delete_old_models)
+                            target_q_func.save(session, t, outfolder=os.path.join(checkpoint_dir, 'target_q_func'),
+                                               delete_prev=delete_old_models)
 
                     print_and_log('\n--- network only ---')
                     print_and_log('return %f' % nw_return)

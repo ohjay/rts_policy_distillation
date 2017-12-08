@@ -11,19 +11,23 @@ _DTYPE_ORDERING = [
 ]
 
 
+def confirm(prompt):
+    """Return True if the user enters 'true' and False otherwise."""
+    try:
+        confirmation = raw_input('%s ' % prompt)
+    except NameError:
+        confirmation = input('%s ' % prompt)
+    if isinstance(confirmation, bool):
+        return confirmation
+    return isinstance(confirmation, str) and confirmation.lower() == 'true'
+
+
 def rm_rf(dir, confirmation_prompt=None):
     """Remove a directory and all of its contents.
     Warning: this is potentially a very dangerous operation.
     """
-    if type(confirmation_prompt) == str:
-        try:
-            confirmation = raw_input('%s ' % confirmation_prompt)
-        except NameError:
-            confirmation = input('%s ' % confirmation_prompt)
-    else:
-        confirmation = True
-    if (isinstance(confirmation, bool) and confirmation) \
-            or (isinstance(confirmation, str) and confirmation.lower() == 'true'):
+    confirmation = confirm(confirmation_prompt) if type(confirmation_prompt) == str else True
+    if confirmation:
         shutil.rmtree(dir)
         print('Successfully removed `%s` and all of its contents.' % dir)
     else:
