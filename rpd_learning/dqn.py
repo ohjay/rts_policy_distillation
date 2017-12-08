@@ -8,6 +8,7 @@ Deep Q-network as described by CS 294-112 (goo.gl/MhA4eA).
 
 import copy
 import yaml
+import pickle
 import os, sys
 import datetime
 import itertools
@@ -213,6 +214,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
             _r_run_dir = os.path.join('.checkpoints', _r_run_dir)
             q_func.restore(session, _r_iteration, os.path.join(_r_run_dir, 'q_func'))
             target_q_func.restore(session, _r_iteration, os.path.join(_r_run_dir, 'target_q_func'))
+            with open(os.path.join(checkpoint_dir, 'moments.pkl')) as f:
+                obs_mean, obs_std = pickle.load(f)
+                moments_initialized = True
 
     with open(os.path.join(checkpoint_dir, 'log.txt'), 'a+') as logfile:
         def print_and_log(text):
@@ -314,6 +318,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                         _obs = _codec.np_to_obs(_obs_np, batched=True)
                         obs_mean = {input_name: np.mean(_obs[input_name], axis=0) for input_name in _obs.keys()}
                         obs_std = {input_name: np.std(_obs[input_name], axis=0) + 1e-9 for input_name in _obs.keys()}
+                        with open(os.path.join(checkpoint_dir, 'moments.pkl'), 'w') as f:
+                            pickle.dump([obs_mean, obs_std], f)
                         _obs_np, _obs = None, None
                         moments_initialized = True
                     obs_t_feed = {obs_t_ph[_name]: (obs_batch[_name] - obs_mean[_name]) / obs_std[_name]
