@@ -248,7 +248,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     reward_weights = [1.0]
                 reset_kwargs['reward_fn_names'] = reward_fn_names
                 reset_kwargs['reward_weights'] = reward_weights
-                print('Updated reward function to `sum(%s)`, as per the curriculum.' % reset_kwargs['reward_fn_names'])
+                print_and_log('Updated reward function to `sum(%s)`, as per the curriculum.' % reset_kwargs['reward_fn_names'])
 
                 if 'gamma' in curriculum_schedule[t] and curriculum_schedule[t]['gamma'] != gamma:
                     # Reconstruct `total_error` and `train_fn` to reflect updated discount factor
@@ -256,7 +256,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     total_error = _compute_total_error()
                     train_fn = minimize_and_clip(optimizer, total_error,
                                                  var_list=q_func_vars, clip_val=grad_norm_clipping)
-                    print('Updated gamma (discount factor) to %f.' % gamma)
+                    print_and_log('Updated gamma (discount factor) to %f.' % gamma)
+                print_and_log('')  # newline
             elif latest_reward_weight is not None:
                 # Update weights for the latest two reward functions
                 reward_weights[-1] = latest_reward_weight.value(t)
@@ -388,7 +389,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                                 img_dir = os.path.join(checkpoint_dir, 'img')
                                 if not os.path.exists(img_dir):
                                     os.makedirs(img_dir)
-                                    print('\nSaving images to %s.' % img_dir)
+                                    print_and_log('\nSaving images to %s.' % img_dir)
                                 image.save(os.path.join(img_dir, 'Game_{}_Step_{}.png'.format(play_count, game_steps)))
 
                         feed_dict = {}
