@@ -71,6 +71,10 @@ class Schedule(object):
         """Value of the schedule at time t."""
         raise NotImplementedError('abstract method')
 
+    def reset(self, t):
+        """Reset the schedule such that the initial timestep is now T."""
+        raise NotImplementedError('abstract method')
+
 
 class PiecewiseSchedule(Schedule):
     def __init__(self, endpoints, interpolation=linear_interpolation, outside_value=None):
@@ -108,6 +112,15 @@ class PiecewiseSchedule(Schedule):
         assert self._outside_value is not None
         return self._outside_value
 
+    def reset(self, t):
+        """Reset the piecewise schedule such that the differences between each timestep are the same,
+        and the values are the same, but the initial timestep is now T.
+        """
+        if len(self._endpoints) > 0:
+            init_timestep = self._endpoints[0][0]
+            for i, (timestep, value) in enumerate(self._endpoints):
+                self._endpoints[i] = (t + timestep - init_timestep, value)
+
 
 class LinearSchedule(Schedule):
     def __init__(self, final_timestep, final_p, initial_p=1.0, initial_timestep=0):
@@ -134,6 +147,13 @@ class LinearSchedule(Schedule):
         """Value of the schedule at time t."""
         fraction = min(float(t - self.initial_timestep) / (self.final_timestep - self.initial_timestep), 1.0)
         return self.initial_p + fraction * (self.final_p - self.initial_p)
+
+    def reset(self, t):
+        """Reset the linear schedule such that the initial timestep is now T,
+        while the difference between the initial timestep and the final timestep is the same as it used to be.
+        """
+        self.final_timestep = t + self.final_timestep - self.initial_timestep
+        self.initial_timestep = t
 
 
 class ReplayBuffer(object):

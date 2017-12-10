@@ -257,6 +257,9 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     train_fn = minimize_and_clip(optimizer, total_error,
                                                  var_list=q_func_vars, clip_val=grad_norm_clipping)
                     print_and_log('Updated gamma (discount factor) to %f.' % gamma)
+                exploration.reset(t)
+                optimizer_spec.lr_schedule.reset(t)
+                print_and_log('Reset the exploration and learning rate schedules.')
                 print_and_log('')  # newline
             elif latest_reward_weight is not None:
                 # Update weights for the latest two reward functions
