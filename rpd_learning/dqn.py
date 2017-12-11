@@ -9,17 +9,19 @@ Deep Q-network as described by CS 294-112 (goo.gl/MhA4eA).
 import copy
 import yaml
 import pickle
+import random
 import os, sys
 import datetime
 import itertools
+import numpy as np
 import tensorflow as tf
 from collections import namedtuple, deque
 
-from rpd_learning.dqn_utils import *
 from rpd_learning.models import Model
-from rpd_learning.general_utils import rm_rf, eval_keys, next_greater
 from rpd_learning.obs_codecs import StandardCodec
-import random
+from rpd_learning.tf_utils import minimize_and_clip, initialize_interdependent_variables
+from rpd_learning.dqn_utils import LinearSchedule, ReplayBuffer
+from rpd_learning.general_utils import merge_dicts, rm_rf, eval_keys, next_greater
 
 OptimizerSpec = namedtuple('OptimizerSpec', ['constructor', 'kwargs', 'lr_schedule'])
 _LAUNCH_TIME = datetime.datetime.now()
@@ -75,6 +77,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     with open(os.path.join(checkpoint_dir, 'config_in.yaml'), 'w') as outfile:
         yaml.dump(config, outfile, default_flow_style=False)  # save the config as backup
     print('Logging training information to `%s`.' % checkpoint_dir)
+
+    # Parse operation
+    operation = config['operation']
+    is_training = operation == 'train'
 
     ###############
     # BUILD MODEL #
@@ -133,7 +139,8 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     # Construct optimization op (with gradient clipping)
     learning_rate = tf.placeholder(tf.float32, (), name='learning_rate')
     optimizer = optimizer_spec.constructor(learning_rate=learning_rate, **optimizer_spec.kwargs)
-    train_op = minimize_and_clip(optimizer, total_error, var_list=q_func_vars, clip_val=grad_norm_clipping)
+    train_op = minimize_and_clip(optimizer, total_error, var_list=q_func_vars,
+                                 clip_val=grad_norm_clipping, is_training=is_training)
 
     # `update_target_fn` will be called periodically to copy Q network to target Q network
     update_target_fn = []
@@ -248,14 +255,15 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     reward_weights = [1.0]
                 reset_kwargs['reward_fn_names'] = reward_fn_names
                 reset_kwargs['reward_weights'] = reward_weights
-                print_and_log('Updated reward function to `sum(%s)`, as per the curriculum.' % reset_kwargs['reward_fn_names'])
+                print_and_log('Updated reward function to `sum(%s)`, as per the curriculum.'
+                              % reset_kwargs['reward_fn_names'])
 
                 if 'gamma' in curriculum_schedule[t] and curriculum_schedule[t]['gamma'] != gamma:
                     # Reconstruct `total_error` and `train_op` to reflect updated discount factor
                     gamma = curriculum_schedule[t]['gamma']
                     total_error = _compute_total_error()
-                    train_op = minimize_and_clip(optimizer, total_error,
-                                                 var_list=q_func_vars, clip_val=grad_norm_clipping)
+                    train_op = minimize_and_clip(optimizer, total_error, var_list=q_func_vars,
+                                                 clip_val=grad_norm_clipping, is_training=is_training)
                     print_and_log('Updated gamma (discount factor) to %f.' % gamma)
                 exploration.reset(t)
                 optimizer_spec.lr_schedule.reset(t)

@@ -1,5 +1,11 @@
 #!/usr/bin/env python
 
+"""
+general_utilities.py
+
+A collection of general utilities.
+"""
+
 import shutil
 import numpy as np
 
@@ -9,6 +15,13 @@ _DTYPE_ORDERING = [
     'byte',    'int8',    'int16',   'int32',   'int64',
     'float16', 'float32', 'float64', 'float96', 'float128'
 ]
+
+
+def merge_dicts(*args):
+    z = args[0].copy()  # start with the first dictionary's keys and values
+    for y in args[1:]:
+        z.update(y)  # modifies z with y's keys and values & returns None
+    return z
 
 
 def confirm(prompt):
