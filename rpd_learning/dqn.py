@@ -133,7 +133,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     # Construct optimization op (with gradient clipping)
     learning_rate = tf.placeholder(tf.float32, (), name='learning_rate')
     optimizer = optimizer_spec.constructor(learning_rate=learning_rate, **optimizer_spec.kwargs)
-    train_fn = minimize_and_clip(optimizer, total_error, var_list=q_func_vars, clip_val=grad_norm_clipping)
+    train_op = minimize_and_clip(optimizer, total_error, var_list=q_func_vars, clip_val=grad_norm_clipping)
 
     # `update_target_fn` will be called periodically to copy Q network to target Q network
     update_target_fn = []
@@ -251,10 +251,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                 print_and_log('Updated reward function to `sum(%s)`, as per the curriculum.' % reset_kwargs['reward_fn_names'])
 
                 if 'gamma' in curriculum_schedule[t] and curriculum_schedule[t]['gamma'] != gamma:
-                    # Reconstruct `total_error` and `train_fn` to reflect updated discount factor
+                    # Reconstruct `total_error` and `train_op` to reflect updated discount factor
                     gamma = curriculum_schedule[t]['gamma']
                     total_error = _compute_total_error()
-                    train_fn = minimize_and_clip(optimizer, total_error,
+                    train_op = minimize_and_clip(optimizer, total_error,
                                                  var_list=q_func_vars, clip_val=grad_norm_clipping)
                     print_and_log('Updated gamma (discount factor) to %f.' % gamma)
                 exploration.reset(t)
@@ -343,7 +343,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                     model_initialized = True
 
                 # Train the model
-                session.run(train_fn, merge_dicts(
+                session.run(train_op, merge_dicts(
                     obs_t_feed,
                     obs_tp1_feed,
                     {act_t_ph[output_name]: act_batch[:, i] for i, output_name in enumerate(output_names)},
