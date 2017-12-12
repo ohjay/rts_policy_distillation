@@ -81,6 +81,7 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     # Parse operation
     operation = config['operation']
     is_training = operation == 'train'
+    print('Set `is_training` to %r.' % is_training)
 
     ###############
     # BUILD MODEL #
@@ -157,22 +158,22 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
     ###########
 
     train_params = config.get('train_params', {})
-    model_initialized = False
-    moments_initialized = False
-    obs_mean, obs_std = {}, {}
-    num_param_updates = 0
     reset_kwargs = config.get('reset_kwargs', {})
     step_kwargs = config.get('step_kwargs', {})
     get_action_kwargs = config.get('get_action_kwargs', {})
     get_random_kwargs = config.get('get_random_kwargs', {})
-    last_obs, reward, done = env.reset(**reset_kwargs)
-    last_obs_np = _codec.obs_to_np(last_obs)
     normalize_inputs = train_params.get('normalize_inputs', True)
     log_freq = train_params.get('log_freq', 150)
     save_model = train_params.get('save_model', True)
     delete_old_models = train_params.get('delete_old_models', False)
     save_images = train_params.get('save_images', True)
     evaluate_network = train_params.get('evaluate_network', False)
+    model_initialized = False
+    moments_initialized = False
+    obs_mean, obs_std = {}, {}
+    num_param_updates = 0
+    last_obs, reward, done = env.reset(**reset_kwargs)
+    last_obs_np = _codec.obs_to_np(last_obs)
     play_count = 0
     game_steps = 0
 

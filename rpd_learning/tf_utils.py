@@ -13,12 +13,12 @@ def minimize_and_clip(optimizer, objective, var_list, clip_val=10, is_training=T
     """Minimize OBJECTIVE using OPTIMIZER w.r.t. variables in VAR_LIST,
     while ensuring that the norm of the gradients for each variable is clipped to CLIP_VAL.
     """
+    gradients = optimizer.compute_gradients(objective, var_list=var_list)
+    for i, (grad, var) in enumerate(gradients):
+        if grad is not None:
+            gradients[i] = (tf.clip_by_norm(grad, clip_val), var)
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS) if is_training else []
     with tf.control_dependencies(update_ops):
-        gradients = optimizer.compute_gradients(objective, var_list=var_list)
-        for i, (grad, var) in enumerate(gradients):
-            if grad is not None:
-                gradients[i] = (tf.clip_by_norm(grad, clip_val), var)
         train_op = optimizer.apply_gradients(gradients)
     return train_op
 
