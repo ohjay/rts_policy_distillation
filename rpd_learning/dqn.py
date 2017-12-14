@@ -402,7 +402,10 @@ def learn(env, config, optimizer_spec, session, exploration=LinearSchedule(10000
                                 if not os.path.exists(img_dir):
                                     os.makedirs(img_dir)
                                     print_and_log('\nSaving images to %s.' % img_dir)
-                                image.save(os.path.join(img_dir, 'Game_{}_Step_{}.png'.format(play_count, game_steps)))
+                                game_dir = os.path.join(img_dir, 'game_{}'.format(play_count))
+                                if not os.path.exists(game_dir):
+                                    os.makedirs(game_dir)
+                                image.save(os.path.join(game_dir, 'step_{}.png'.format(game_steps)))
 
                         feed_dict = {}
                         for _name in input_names:

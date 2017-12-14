@@ -39,6 +39,6 @@ def initialize_interdependent_variables(session, vars_list, feed_dict):
             # This can happen if the variables all depend on each other, or more likely if there's
             # another variable outside of the list that still needs to be initialized. This could be
             # detected here, but life's finite.
-            raise Exception("Cycle in variable dependencies, or external precondition unsatisfied.")
+            raise Exception('Cycle in variable dependencies, or external precondition unsatisfied.')
         else:
             vars_left = new_vars_left

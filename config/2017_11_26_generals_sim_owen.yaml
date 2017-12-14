@@ -32,7 +32,7 @@ train_params:
     - num_iterations: 0.01
   normalize_inputs: True
   log_freq: 200  # log every X episodes
-  log_recent_rewards: True
+  log_recent_rewards: False
   save_model: True
   delete_old_models: True
   save_images: True

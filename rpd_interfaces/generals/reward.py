@@ -83,7 +83,7 @@ def vision_gain(player, state, action, next_state, opponent_land_count):
 def army_size(player, state, action, next_state, opponent_land_count):
     if state is None:
         return np.sum(next_state['friendly'])
-    return np.sum(next_state['friendly']) - np.count_nonzero(state['friendly'])
+    return np.sum(next_state['friendly']) - np.sum(state['friendly'])
 
 
 SIM_REWARD_FUNCTIONS = {
